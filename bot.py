@@ -18,6 +18,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 import aiosqlite
 
+from aiohttp import web
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,65 @@ async def get_last_assessment(tg_id):
     return None, None
 
 
-async def save_plan(tg_id, plan_type, content):
+async def save_session(session_id: str, data: dict):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id  TEXT PRIMARY KEY,
+                data        TEXT,
+                created_at  TEXT
+            )
+        """)
+        await db.execute(
+            "INSERT OR REPLACE INTO sessions (session_id, data, created_at) VALUES (?, ?, ?)",
+            (session_id, json.dumps(data, ensure_ascii=False), datetime.now().isoformat())
+        )
+        await db.commit()
+
+
+async def get_session(session_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT data FROM sessions WHERE session_id=?", (session_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                return json.loads(row[0])
+    return None
+
+
+# ───────── HTTP API ─────────
+
+async def handle_save_session(request):
+    """Принимает данные с сайта, сохраняет, возвращает короткий ID."""
+    try:
+        # CORS заголовки
+        if request.method == 'OPTIONS':
+            return web.Response(
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                }
+            )
+        data = await request.json()
+        import secrets
+        session_id = secrets.token_urlsafe(8)  # ~11 символов — влезает в Telegram
+        await save_session(session_id, data)
+        return web.json_response(
+            {"session_id": session_id},
+            headers={'Access-Control-Allow-Origin': '*'}
+        )
+    except Exception as e:
+        logger.error(f"Save session error: {e}")
+        return web.json_response(
+            {"error": str(e)}, status=500,
+            headers={'Access-Control-Allow-Origin': '*'}
+        )
+
+
+async def handle_health(request):
+    return web.Response(text="OK")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO plans (tg_id, type, content, created_at) VALUES (?, ?, ?, ?)",
@@ -228,7 +288,7 @@ async def cmd_start(message: Message):
 
     if data:
         await save_assessment(message.from_user.id, data)
-        await message.answer(
+
             f"👋 Привет, *{message.from_user.first_name}*!\n\n"
             "Я *FitState Bot* — твой персональный ассистент по питанию и тренировкам.\n\n"
             "Я получил результаты твоего теста. Смотри данные ниже 👇",
@@ -487,6 +547,19 @@ async def setup_commands():
 async def main():
     await init_db()
     await setup_commands()
+
+    # Запускаем HTTP сервер для приёма данных с сайта
+    app = web.Application()
+    app.router.add_post('/save_session', handle_save_session)
+    app.router.add_options('/save_session', handle_save_session)
+    app.router.add_get('/health', handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"HTTP server started on port {port}")
+
     logger.info("FitState Bot started")
     await dp.start_polling(bot)
 
