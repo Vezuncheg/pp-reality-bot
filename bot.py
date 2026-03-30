@@ -109,7 +109,18 @@ def decode_data(raw: str) -> dict:
     try:
         padded = raw + "=" * (-len(raw) % 4)
         decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
-        return json.loads(decoded)
+        data = json.loads(decoded)
+        # Разворачиваем сокращённые ключи обратно
+        KEY_MAP = {
+            'g':'gender','gl':'goal','a':'age','h':'height','w':'weight',
+            'n':'neck','ws':'waist','hp':'hips','ac':'activity','sl':'sleep',
+            'st':'stress','e':'eating','ck':'cook','fl':'fitness_lvl',
+            'inj':'injuries','pl':'place','dr':'drive','fr':'fail_reason','s':'style'
+        }
+        expanded = {}
+        for k, v in data.items():
+            expanded[KEY_MAP.get(k, k)] = v
+        return expanded
     except Exception as e:
         logger.error(f"Decode error: {e}")
         return {}
