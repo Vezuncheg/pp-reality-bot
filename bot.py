@@ -4,8 +4,10 @@ import base64
 import logging
 import math
 import os
+import secrets
 import httpx
 from datetime import datetime
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -17,8 +19,6 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 
 import aiosqlite
-
-from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,6 +61,13 @@ async def init_db():
                 created_at  TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id  TEXT PRIMARY KEY,
+                data        TEXT,
+                created_at  TEXT
+            )
+        """)
         await db.commit()
 
 
@@ -96,15 +103,17 @@ async def get_last_assessment(tg_id):
     return None, None
 
 
+async def save_plan(tg_id, plan_type, content):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO plans (tg_id, type, content, created_at) VALUES (?, ?, ?, ?)",
+            (tg_id, plan_type, content, datetime.now().isoformat())
+        )
+        await db.commit()
+
+
 async def save_session(session_id: str, data: dict):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id  TEXT PRIMARY KEY,
-                data        TEXT,
-                created_at  TEXT
-            )
-        """)
         await db.execute(
             "INSERT OR REPLACE INTO sessions (session_id, data, created_at) VALUES (?, ?, ?)",
             (session_id, json.dumps(data, ensure_ascii=False), datetime.now().isoformat())
@@ -126,20 +135,15 @@ async def get_session(session_id: str):
 # ───────── HTTP API ─────────
 
 async def handle_save_session(request):
-    """Принимает данные с сайта, сохраняет, возвращает короткий ID."""
+    if request.method == 'OPTIONS':
+        return web.Response(headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        })
     try:
-        # CORS заголовки
-        if request.method == 'OPTIONS':
-            return web.Response(
-                headers={
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                }
-            )
         data = await request.json()
-        import secrets
-        session_id = secrets.token_urlsafe(8)  # ~11 символов — влезает в Telegram
+        session_id = secrets.token_urlsafe(8)
         await save_session(session_id, data)
         return web.json_response(
             {"session_id": session_id},
@@ -154,13 +158,7 @@ async def handle_save_session(request):
 
 
 async def handle_health(request):
-    return web.Response(text="OK")
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO plans (tg_id, type, content, created_at) VALUES (?, ?, ?, ?)",
-            (tg_id, plan_type, content, datetime.now().isoformat())
-        )
-        await db.commit()
+    return web.Response(text="OK", headers={'Access-Control-Allow-Origin': '*'})
 
 
 # ───────── HELPERS ─────────
@@ -169,18 +167,7 @@ def decode_data(raw: str) -> dict:
     try:
         padded = raw + "=" * (-len(raw) % 4)
         decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
-        data = json.loads(decoded)
-        # Разворачиваем сокращённые ключи обратно
-        KEY_MAP = {
-            'g':'gender','gl':'goal','a':'age','h':'height','w':'weight',
-            'n':'neck','ws':'waist','hp':'hips','ac':'activity','sl':'sleep',
-            'st':'stress','e':'eating','ck':'cook','fl':'fitness_lvl',
-            'inj':'injuries','pl':'place','dr':'drive','fr':'fail_reason','s':'style'
-        }
-        expanded = {}
-        for k, v in data.items():
-            expanded[KEY_MAP.get(k, k)] = v
-        return expanded
+        return json.loads(decoded)
     except Exception as e:
         logger.error(f"Decode error: {e}")
         return {}
@@ -222,7 +209,6 @@ def format_results(data: dict) -> str:
         lines.append(f"  🍞 Углеводы — {carb} г ({round(carb*4)} ккал)")
         lines.append(f"\n💧 *Вода:* {water/1000:.1f} л/день")
 
-    # % жира
     neck  = float(data.get("neck", 0) or 0)
     waist = float(data.get("waist", 0) or 0)
     hips  = float(data.get("hips", 0) or 0)
@@ -246,13 +232,10 @@ def format_results(data: dict) -> str:
 
     lines.append(f"\n*Цель:* {goal_map.get(goal, '—')}")
 
-    fitness_lvl = data.get("fitness_lvl")
-    if fitness_lvl:
-        lines.append(f"*Уровень подготовки:* {fit_map.get(fitness_lvl, '—')}")
-
-    eating = data.get("eating")
-    if eating:
-        lines.append(f"*Питание сейчас:* {eat_map.get(eating, '—')}")
+    if data.get("fitness_lvl"):
+        lines.append(f"*Уровень подготовки:* {fit_map.get(data['fitness_lvl'], '—')}")
+    if data.get("eating"):
+        lines.append(f"*Питание сейчас:* {eat_map.get(data['eating'], '—')}")
 
     drive = data.get("drive", [])
     if drive:
@@ -284,11 +267,17 @@ async def cmd_start(message: Message):
 
     await save_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-    data = decode_data(param) if param else {}
+    data = {}
+    if param:
+        session_data = await get_session(param)
+        if session_data:
+            data = session_data
+        else:
+            data = decode_data(param)
 
     if data:
         await save_assessment(message.from_user.id, data)
-
+        await message.answer(
             f"👋 Привет, *{message.from_user.first_name}*!\n\n"
             "Я *FitState Bot* — твой персональный ассистент по питанию и тренировкам.\n\n"
             "Я получил результаты твоего теста. Смотри данные ниже 👇",
@@ -396,7 +385,6 @@ async def handle_plan(tg_id: int, plan_type: str, message: Message):
     )
 
     plan = await generate_plan_claude(data, plan_type)
-
     await bot.delete_message(message.chat.id, wait_msg.message_id)
 
     chunks = [plan[i:i+4000] for i in range(0, len(plan), 4000)]
@@ -427,87 +415,63 @@ async def generate_plan_claude(data: dict, plan_type: str) -> str:
     drive = data.get("drive", [])
     mots  = ", ".join(mot_map.get(x, x) for x in (drive if isinstance(drive, list) else [drive]))
 
-    goal       = goal_map.get(data.get("goal", ""), "—")
-    activity   = act_map.get(str(data.get("activity", "")), "—")
-    fitness    = fit_map.get(data.get("fitness_lvl", ""), "—")
-    place      = place_map.get(data.get("place", ""), "—")
-    injuries   = inj_map.get(data.get("injuries", "none"), "нет")
-    eating     = eat_map.get(data.get("eating", ""), "—")
-    cook       = cook_map.get(data.get("cook", ""), "—")
-    style      = style_map.get(data.get("style", ""), "—")
-    fail       = fail_map.get(data.get("fail_reason", ""), "—")
-    sleep      = sleep_map.get(data.get("sleep", ""), "—")
-    stress     = data.get("stress", "—")
+    goal     = goal_map.get(data.get("goal", ""), "—")
+    activity = act_map.get(str(data.get("activity", "")), "—")
+    fitness  = fit_map.get(data.get("fitness_lvl", ""), "—")
+    place    = place_map.get(data.get("place", ""), "—")
+    injuries = inj_map.get(data.get("injuries", "none"), "нет")
+    eating   = eat_map.get(data.get("eating", ""), "—")
+    cook     = cook_map.get(data.get("cook", ""), "—")
+    style    = style_map.get(data.get("style", ""), "—")
+    fail     = fail_map.get(data.get("fail_reason", ""), "—")
+    sleep    = sleep_map.get(data.get("sleep", ""), "—")
+    stress   = data.get("stress", "—")
     gender_str = "мужской" if g == "m" else "женский"
 
-    profile = f"""Пол: {gender_str}, возраст: {data.get('age','?')}, рост: {data.get('height','?')} см, вес: {data.get('weight','?')} кг
-Цель: {goal}
-Активность: {activity}
-Уровень подготовки: {fitness}
-Место тренировок: {place}
-Травмы: {injuries}
-Сон: {sleep}
-Стресс: {stress}/5
-Питание сейчас: {eating}
-Готовит дома: {cook}
-Мотивация: {mots}
-Подход: {style}
-Причина прошлых неудач: {fail}"""
+    profile = (
+        f"Пол: {gender_str}, возраст: {data.get('age','?')}, "
+        f"рост: {data.get('height','?')} см, вес: {data.get('weight','?')} кг\n"
+        f"Цель: {goal}\n"
+        f"Активность: {activity}\n"
+        f"Уровень подготовки: {fitness}\n"
+        f"Место тренировок: {place}\n"
+        f"Травмы: {injuries}\n"
+        f"Сон: {sleep}\n"
+        f"Стресс: {stress}/5\n"
+        f"Питание сейчас: {eating}\n"
+        f"Готовит дома: {cook}\n"
+        f"Мотивация: {mots}\n"
+        f"Подход: {style}\n"
+        f"Причина прошлых неудач: {fail}"
+    )
 
     if plan_type == "nutrition":
-        prompt = f"""Ты эксперт по спортивному питанию. Составь персональный план питания на неделю на русском языке.
-
-ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
-{profile}
-
-ФОРМАТ (Markdown для Telegram):
-*🥗 Персональный план питания*
-
-*Твои нормы:*
-Калории и БЖУ — конкретные цифры.
-
-*Принципы питания*
-3–4 правила под цель и образ жизни.
-
-*Меню на неделю*
-Каждый день: завтрак, обед, ужин, перекус. Конкретные продукты с граммовками. Учти готовку дома: {cook}.
-
-*Список продуктов на неделю*
-Краткий список что купить.
-
-*Первые шаги*
-3 действия которые сделать сегодня.
-
-Пиши конкретно, без воды. Подход: {style}."""
-
+        prompt = (
+            "Ты эксперт по спортивному питанию. Составь персональный план питания на неделю на русском языке.\n\n"
+            f"ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:\n{profile}\n\n"
+            "ФОРМАТ (Markdown для Telegram):\n"
+            "*🥗 Персональный план питания*\n\n"
+            "*Твои нормы:*\nКалории и БЖУ — конкретные цифры.\n\n"
+            "*Принципы питания*\n3–4 правила под цель и образ жизни.\n\n"
+            f"*Меню на неделю*\nКаждый день: завтрак, обед, ужин, перекус. Конкретные продукты с граммовками. Учти готовку дома: {cook}.\n\n"
+            "*Список продуктов на неделю*\nКраткий список что купить.\n\n"
+            "*Первые шаги*\n3 действия которые сделать сегодня.\n\n"
+            f"Пиши конкретно, без воды. Подход: {style}."
+        )
     else:
-        prompt = f"""Ты эксперт по фитнесу. Составь персональную программу тренировок на 4 недели на русском языке.
-
-ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
-{profile}
-
-ФОРМАТ (Markdown для Telegram):
-*🏋️ Персональный план тренировок*
-
-*Твой уровень и подход*
-2–3 предложения почему план составлен именно так.
-
-*Расписание на неделю*
-7 дней: тренировки и отдых. Место: {place}.
-
-*Программа тренировок*
-Для каждого тренировочного дня: упражнения, подходы × повторения, отдых. Учти травмы: {injuries}.
-
-*Прогрессия нагрузки*
-Как менять нагрузку по неделям (1–4 неделя).
-
-*Восстановление*
-3 совета под стресс {stress}/5 и сон {sleep}.
-
-*Первые шаги*
-3 действия чтобы начать уже сегодня.
-
-Пиши конкретно. Уровень: {fitness}."""
+        prompt = (
+            "Ты эксперт по фитнесу. Составь персональную программу тренировок на 4 недели на русском языке.\n\n"
+            f"ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:\n{profile}\n\n"
+            "ФОРМАТ (Markdown для Telegram):\n"
+            "*🏋️ Персональный план тренировок*\n\n"
+            "*Твой уровень и подход*\n2–3 предложения почему план составлен именно так.\n\n"
+            f"*Расписание на неделю*\n7 дней: тренировки и отдых. Место: {place}.\n\n"
+            f"*Программа тренировок*\nДля каждого тренировочного дня: упражнения, подходы × повторения, отдых. Учти травмы: {injuries}.\n\n"
+            "*Прогрессия нагрузки*\nКак менять нагрузку по неделям (1–4 неделя).\n\n"
+            f"*Восстановление*\n3 совета под стресс {stress}/5 и сон {sleep}.\n\n"
+            "*Первые шаги*\n3 действия чтобы начать уже сегодня.\n\n"
+            f"Пиши конкретно. Уровень: {fitness}."
+        )
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -548,7 +512,6 @@ async def main():
     await init_db()
     await setup_commands()
 
-    # Запускаем HTTP сервер для приёма данных с сайта
     app = web.Application()
     app.router.add_post('/save_session', handle_save_session)
     app.router.add_options('/save_session', handle_save_session)
