@@ -10,7 +10,10 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
-PAYMENT_URL = "https://fitstate.ru/pay"
+QUIZ_URL  = "https://vezuncheg.github.io/fitstate"
+PAY_URL   = "https://vezuncheg.github.io/fitstate/pay.html"
+PAY_PROMO = "https://vezuncheg.github.io/fitstate/pay.html?promo=1"
+PAYMENT_URL = PAY_URL
 
 ASK_GENDER, ASK_AGE, ASK_WEIGHT, ASK_HEIGHT, ASK_GOAL = range(5)
 
@@ -97,48 +100,73 @@ async def schedule_dojim(uid, context):
     jq = context.application.job_queue
     if not jq:
         return
-    arch_key = context.user_data.get("arch_key", "emotional_eater")
 
+    # ── Через 1 час: таймер истёк, скидки нет, но запись открыта ──
     async def d1h(ctx):
-        await ctx.bot.send_message(uid,
-            "Вижу, что ты ещё думаешь — это нормально.\n\n"
-            "Скидка 20% истекла, но запись ещё открыта.\n"
-            "Что тебе важнее всего узнать?", reply_markup=more_kb())
+        await ctx.bot.send_message(
+            uid,
+            "Скидка 20% истекла, но запись в Реалити ещё открыта.\n\n"
+            "👇 Успейте занять место по стандартной цене:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]
+            ])
+        )
 
-    async def dd1(ctx):
-        await ctx.bot.send_message(uid,
-            "*О нас*\n\n9 лет. 55 000+ участников. Научный подход.\n\n"
-            "Мы меняем причину, по которой у тебя не получалось раньше.",
-            parse_mode="Markdown", reply_markup=pay_kb())
+    # ── Блок 1: Об Иване (день 1) ──
+    async def block1(ctx):
+        await ctx.bot.send_message(
+            uid,
+            "[ БЛОК 1 — ОБ ИВАНЕ ]\n\n"
+            "⏳ Этот блок будет заполнен реальным текстом об Иване Самохине.\n"
+            "Скоро здесь появится история, экспертиза и почему ему можно доверять.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
+            ])
+        )
 
-    async def dd2(ctx):
-        await ctx.bot.send_message(uid,
-            "*Программа по неделям:*\n\n"
-            "📍 1–2: диагностика и настройка\n📍 3–4: первые результаты\n"
-            "📍 5–6: закрепление\n📍 7–8: финальный рывок + план на после",
-            parse_mode="Markdown", reply_markup=pay_kb())
+    # ── Блок 2: Подробно о продукте (день 2) ──
+    async def block2(ctx):
+        await ctx.bot.send_message(
+            uid,
+            "[ БЛОК 2 — О ПРОДУКТЕ ]\n\n"
+            "⏳ Здесь будет подробный рассказ о Реалити #ПП от Ивана — "
+            "что внутри, как устроен процесс, почему это работает.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
+            ])
+        )
 
-    async def dd3(ctx):
-        arch = ARCHETYPES.get(arch_key, ARCHETYPES["emotional_eater"])
-        await ctx.bot.send_message(uid, arch["day3"], reply_markup=pay_kb())
+    # ── Блок 3: Кому подойдёт, а кому нет (день 3) ──
+    async def block3(ctx):
+        await ctx.bot.send_message(
+            uid,
+            "[ БЛОК 3 — КОМУ ПОДОЙДЁТ ]\n\n"
+            "⏳ Здесь будет честный разбор — кому Реалити даст результат, "
+            "а кому пока рано. Это важно, чтобы Вы приняли осознанное решение.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
+            ])
+        )
 
-    async def dd5(ctx):
-        await ctx.bot.send_message(uid,
-            "Поток идёт. Люди с похожими целями уже видят результат.\n\n"
-            "Ты можешь присоединиться к следующему.", reply_markup=pay_kb())
+    # ── Финальный дожим (день 5) ──
+    async def final(ctx):
+        await ctx.bot.send_message(
+            uid,
+            "*Реалити уже идёт. Места заканчиваются.*\n\n"
+            "Вы уже знаете свой тип и свою причину.\n"
+            "Осталось сделать один шаг — выбрать тариф и начать.\n\n"
+            "Старт: *11 мая*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]
+            ])
+        )
 
-    async def dd7(ctx):
-        await ctx.bot.send_message(uid,
-            "*Набор закрывается через 24 часа.*\n\n"
-            "Ты знаешь свою причину. У тебя есть прогноз. Остался один шаг.",
-            parse_mode="Markdown", reply_markup=pay_kb())
-
-    jq.run_once(d1h, 3600,   name=f"d1h_{uid}")
-    jq.run_once(dd1, 86400,  name=f"dd1_{uid}")
-    jq.run_once(dd2, 172800, name=f"dd2_{uid}")
-    jq.run_once(dd3, 259200, name=f"dd3_{uid}")
-    jq.run_once(dd5, 432000, name=f"dd5_{uid}")
-    jq.run_once(dd7, 604800, name=f"dd7_{uid}")
+    jq.run_once(d1h,    3600,    name=f"d1h_{uid}")
+    jq.run_once(block1, 86400,   name=f"b1_{uid}")
+    jq.run_once(block2, 172800,  name=f"b2_{uid}")
+    jq.run_once(block3, 259200,  name=f"b3_{uid}")
+    jq.run_once(final,  432000,  name=f"fin_{uid}")
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,7 +177,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not arch:
         await update.message.reply_text(
             "Привет! 👋\nПройди тест и получи разбор:\n\n"
-            "👉 https://vezuncheg.github.io/fitstate")
+            "👉 " + QUIZ_URL)
         return ConversationHandler.END
 
     await update.message.reply_text("Привет! 👋\n\nПолучил твои ответы. Даю разбор — 1 минута.")
@@ -265,18 +293,35 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     uid = update.callback_query.from_user.id
     await update.callback_query.message.reply_text(
-        "🎯 *Хочешь достичь этого результата вместе с нами?*\n\n"
-        "Набор в поток FitState открыт.\n"
-        "Старт: *[дата]*  ·  Длительность: *8 недель*\n\n"
-        "✅ Персональный план под твой тип\n"
-        "✅ Закрытый Telegram-канал\n"
-        "✅ Куратор на связи каждый день\n"
-        "✅ Разбор прогресса еженедельно\n\n"
-        "⏱ *Скидка 20% — действует 1 час с этого момента*",
+        "🎯 *Хотите достичь этого результата вместе с нами в группе?*\n\n"
+        "Набор в Реалити #ПП «Программа Преображения» открыт прямо сейчас.\n\n"
+        "Старт: *11 мая*\n"
+        "Длительность: *8 недель*\n\n"
+        "*ФОРМАТ:*\n"
+        "❌ ЭТО НЕ КУРС\n"
+        "❌ Не краткосрочная программа\n"
+        "❌ Не марафон\n"
+        "❌ Не челлендж\n"
+        "👉 Это участие в процессе — реалити практикум. Записанные видео + живое сопровождение Ивана и куратора\n\n"
+        "*Вот что вы получите, чтобы добиться своей цели по преображению тела:*\n\n"
+        "✅ Доступ в закрытый Telegram-канал\n"
+        "✅ Доступ в закрытый чат с участниками группы\n"
+        "✅ Ежедневные короткие видео от Ивана Самохина: конкретика по системе питания и тренировок\n"
+        "✅ Персональный план тренировок под Ваш тип тела и образ жизни\n"
+        "✅ Систему питания и персональный план — без голодания и жёстких ограничений\n"
+        "✅ Обратная связь от куратора ежедневно\n"
+        "✅ Разбор прогресса участников еженедельно от Ивана Самохина\n"
+        "✅ Поддержка от Ивана и других участников реалити\n\n"
+        "*ПОЧЕМУ РЕАЛИТИ?*\n"
+        "Тут будет реальная жизнь, а не идеальная картинка.\n\n"
+        "В закрытом канале Иван каждый день показывает, как за 4 недели вернул форму — без диет, насилия и марафонов.\n\n"
+        "Всё из реальной жизни: какие продукты покупает, как готовит, как считает КБЖУ, как тренируется, как справляется с усталостью.\n\n"
+        "За 8 недель вы почувствуете контроль над телом, едой и энергией — без диет, запретов и жизни в спортзале.\n\n"
+        "⏱ *Прямо сейчас — скидка 20%, она действует 1 час с этого момента.*\n\n"
+        "Хотите воспользоваться скидкой 20% прямо сейчас?",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Оплатить со скидкой →", url=PAYMENT_URL)],
-            [InlineKeyboardButton("Расскажи подробнее", callback_data="more_info")],
+            [InlineKeyboardButton("🔥 Воспользоваться скидкой 20% →", url=PAY_PROMO)],
         ]))
 
     await schedule_dojim(uid, context)
