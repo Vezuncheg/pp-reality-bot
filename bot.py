@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -20,37 +21,37 @@ ASK_GENDER, ASK_AGE, ASK_WEIGHT, ASK_HEIGHT, ASK_GOAL = range(5)
 ARCHETYPES = {
     "emotional_eater": {
         "emoji": "😰", "name": "Эмоциональный едок",
-        "problem": "Ты не срываешься потому что слабый.\nТы срываешься, потому что мозг выучил паттерн:\nстресс → еда → легче.\n\nЭто не вопрос силы воли — это вопрос замены инструмента.\nБез работы с этим — любая диета временная.",
-        "cycle": "🔴 Что происходит у тебя:\n\n→ Стресс активирует тягу к еде\n→ Ты ешь — становится легче\n→ Потом вина → ещё стресс → снова ешь\n→ Круг замкнулся",
+        "problem": "Вы не срываетесь потому что слабый.\nВы срываетесь, потому что мозг выучил паттерн:\nстресс → еда → легче.\n\nЭто не вопрос силы воли — это вопрос замены инструмента.\nБез работы с этим — любая диета временная.",
+        "cycle": "🔴 Что происходит у Вас:\n\n→ Стресс активирует тягу к еде\n→ Ты ешь — становится легче\n→ Потом вина → ещё стресс → снова ешь\n→ Круг замкнулся",
         "solution": "✅ Что реально помогает:\n\n→ Замечать триггер до того, как рука потянулась\n→ Заменить еду другим инструментом снятия стресса\n→ Убрать провоцирующие ситуации заранее\n\nЭто навык. Ему можно научиться за 3–4 недели.",
-        "tools": "🛠 Что уберём в твоём случае:\n\n1️⃣ Техники прерывания триггера\n2️⃣ Быстрые замены — 3–4 инструмента без еды\n3️⃣ Структура питания — убираем ситуации срыва",
+        "tools": "🛠 Что уберём в Вашем случае:\n\n1️⃣ Техники прерывания триггера\n2️⃣ Быстрые замены — 3–4 инструмента без еды\n3️⃣ Структура питания — убираем ситуации срыва",
         "day3": "📌 Топ-3 ошибки эмоционального едока:\n\n1. Держать дома запасы любимой еды\n2. Пропускать приёмы пищи — голод усиливает триггер\n3. Бороться силой воли — нужно переключать, не бороться",
         "proof": "Анна, 34 года — минус 11 кг за 8 недель.\nПерестала есть от стресса уже на 2-й неделе.\n\nМихаил, 31 год — минус 9 кг. Впервые не сорвался ни разу.",
     },
     "social_hostage": {
         "emoji": "🍕", "name": "Социальный заложник",
-        "problem": "Наедине с собой ты держишься отлично.\nНо любое застолье или компания — всё рушится.\n\nЭто не слабость характера — это отсутствие конкретной стратегии.",
-        "cycle": "🔴 Что происходит у тебя:\n\n→ Всю неделю держишься — приходит праздник\n→ Неловко отказывать, не хочешь выделяться\n→ Ешь как все — прогресс обнуляется\n→ Снова с понедельника",
+        "problem": "Наедине с собой Вы держитесь отлично.\nНо любое застолье или компания — всё рушится.\n\nЭто не слабость характера — это отсутствие конкретной стратегии.",
+        "cycle": "🔴 Что происходит у Вас:\n\n→ Всю неделю держишься — приходит праздник\n→ Неловко отказывать, не хочешь выделяться\n→ Ешь как все — прогресс обнуляется\n→ Снова с понедельника",
         "solution": "✅ Что реально помогает:\n\n→ Конкретные сценарии: кафе, корпоратив, застолье\n→ Фразы-ответы, которые не обидят\n→ Правило 80/20 — как позволять себе без ущерба\n\nЭто навык, а не сила воли.",
-        "tools": "🛠 Что уберём в твоём случае:\n\n1️⃣ Стратегия поведения в компании без срывов\n2️⃣ Гибкая система — любой праздник не ломает прогресс\n3️⃣ Коммуникация — как отказывать без обид",
+        "tools": "🛠 Что уберём в Вашем случае:\n\n1️⃣ Стратегия поведения в компании без срывов\n2️⃣ Гибкая система — любой праздник не ломает прогресс\n3️⃣ Коммуникация — как отказывать без обид",
         "day3": "📌 Топ-3 ошибки социального заложника:\n\n1. Ждать подходящего момента — его не будет\n2. Избегать мероприятий — это не жизнь\n3. Есть про запас перед выходом — не работает",
         "proof": "Катя, 29 лет — минус 8 кг без отказа от вечеринок.\n\nДмитрий, 36 лет — минус 10 кг. Рестораны с клиентами каждую неделю — ни одного срыва.",
     },
     "metabolic_skeptic": {
         "emoji": "⚖️", "name": "Метаболический скептик",
-        "problem": "Ешь немного, стараешься, делаешь всё правильно.\nА результата нет.\n\nСтандартные советы просто не подходят для твоей ситуации.",
-        "cycle": "🔴 Что происходит у тебя:\n\n→ Ешь мало — вес стоит или растёт\n→ Добавляешь активность — результата нет\n→ Думаешь «мне не дано»\n→ Опускаешь руки",
+        "problem": "Вы едите немного, стараетесь, делаете всё правильно.\nА результата нет.\n\nСтандартные советы просто не подходят для Вашей ситуации.",
+        "cycle": "🔴 Что происходит у Вас:\n\n→ Ешь мало — вес стоит или растёт\n→ Добавляешь активность — результата нет\n→ Думаешь «мне не дано»\n→ Опускаешь руки",
         "solution": "✅ Что реально помогает:\n\n→ Точный расчёт твоего реального коридора калорий\n→ Перезапуск обмена через правильный дефицит\n→ Работа с режимом сна и стрессом\n\nМетаболизм не сломан. Ему дают неправильный сигнал.",
-        "tools": "🛠 Что уберём в твоём случае:\n\n1️⃣ Точная калорийность — реальный дефицит именно для тебя\n2️⃣ Состав питания — БЖУ, запускающий жиросжигание\n3️⃣ Режим — сон и стресс влияют сильнее, чем многие думают",
+        "tools": "🛠 Что уберём в Вашем случае:\n\n1️⃣ Точная калорийность — реальный дефицит именно для Вас\n2️⃣ Состав питания — БЖУ, запускающий жиросжигание\n3️⃣ Режим — сон и стресс влияют сильнее, чем многие думают",
         "day3": "📌 Почему «мало ешь, но не худеешь»:\n\n1. Хроническое недоедание замедляет метаболизм\n2. Скрытые калории в «здоровых» продуктах\n3. Кортизол от стресса блокирует жиросжигание",
         "proof": "Ирина, 38 лет — 2 года не могла сдвинуться с места.\nЗа 8 недель минус 7 кг. Оказалось — ела слишком мало.\n\nСергей, 33 года — тренировался 4 раза в неделю. Поменяли питание — минус 9 кг.",
     },
     "starter_stopper": {
         "emoji": "🔁", "name": "Стартер-стопер",
-        "problem": "В начале мотивация огромная.\nНо через 10–14 дней она испаряется — и всё заново.\n\nПроблема не в тебе.\nПроблема в том, что ты работаешь на силе воли. А она конечна у всех.",
-        "cycle": "🔴 Что происходит у тебя:\n\n→ Мощный старт — мотивация на максимуме\n→ Через 1–2 недели энтузиазм падает\n→ Один пропуск → ощущение провала → бросаешь\n→ Через время — снова с понедельника",
+        "problem": "В начале мотивация огромная.\nНо через 10–14 дней она испаряется — и всё заново.\n\nПроблема не в Вас.\nПроблема в том, что Вы работаете на силе воли. А она конечна у всех.",
+        "cycle": "🔴 Что происходит у Вас:\n\n→ Мощный старт — мотивация на максимуме\n→ Через 1–2 недели энтузиазм падает\n→ Один пропуск → ощущение провала → бросаешь\n→ Через время — снова с понедельника",
         "solution": "✅ Что реально помогает:\n\n→ Заменить мотивацию системой — она не исчезает\n→ Внешние точки контроля: куратор, группа\n→ Маленькие wins вместо большой далёкой цели\n\nКогда есть система и окружение — мотивация не нужна.",
-        "tools": "🛠 Что уберём в твоём случае:\n\n1️⃣ Система вместо силы воли — структура, которой легко следовать\n2️⃣ Куратор и группа — поддержка, которая не даёт выпасть\n3️⃣ Протокол срыва — что делать если пропустил",
+        "tools": "🛠 Что уберём в Вашем случае:\n\n1️⃣ Система вместо силы воли — структура, которой легко следовать\n2️⃣ Куратор и группа — поддержка, которая не даёт выпасть\n3️⃣ Протокол срыва — что делать если пропустил",
         "day3": "📌 Почему стартер-стопер останавливается на 2-й неделе:\n\n1. Мотивация эмоциональная — она быстро гаснет\n2. Нет системы на сложный день — один пропуск = провал\n3. Цель далеко — мозг не видит прогресса",
         "proof": "Олег, 27 лет — начинал 6 раз за 2 года.\nВ потоке FitState впервые прошёл все 8 недель. Минус 8 кг.\n\nНастя, 31 год — группа и куратор сделали то, что сила воли не смогла за 3 года.",
     },
@@ -176,16 +177,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not arch:
         await update.message.reply_text(
-            "Привет! 👋\nПройди тест и получи разбор:\n\n"
+            "Привет! 👋\nПройдите тест и получи разбор:\n\n"
             "👉 " + QUIZ_URL)
         return ConversationHandler.END
 
-    await update.message.reply_text("Привет! 👋\n\nПолучил твои ответы. Даю разбор — 1 минута.")
-    await update.message.reply_text(f"*{arch['emoji']} Твой тип: {arch['name']}*\n\n{arch['problem']}", parse_mode="Markdown")
+    await update.message.reply_text("Привет! 👋\n\nПолучил Ваши ответы. Даю разбор — 1 минута.")
+    await asyncio.sleep(1.2)
+    await update.message.reply_text(f"*{arch['emoji']} Ваш тип: {arch['name']}*\n\n{arch['problem']}", parse_mode="Markdown")
+    await asyncio.sleep(1.2)
     await update.message.reply_text(arch["cycle"])
+    await asyncio.sleep(1.2)
     await update.message.reply_text(arch["solution"])
     await update.message.reply_text(
-        "Хочешь узнать — *каким ты можешь стать за 2 месяца?*\n\nНужно пару вопросов.",
+        "Хотите узнать — *каким Вы можете стать за 2 месяца?*\n\nНужно задать пару вопросов.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Да, хочу узнать →", callback_data="go")],
@@ -196,14 +200,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_later(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("Хорошо! Когда будешь готов — /start\nМеню: /menu")
+    await update.callback_query.message.reply_text("Хорошо! Когда будете готовы — /start\nМеню: /menu")
     return ConversationHandler.END
 
 
 async def cb_go(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text(
-        "Отлично! Отвечай как есть.\n\n*Ты мужчина или женщина?*",
+        "Отлично! Отвечайте как есть.\n\n*Ты мужчина или женщина?*",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("Мужчина", callback_data="gm"),
@@ -215,7 +219,7 @@ async def cb_go(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     context.user_data["gender"] = "male" if update.callback_query.data == "gm" else "female"
-    await update.callback_query.message.reply_text("*Сколько тебе лет?*\n\nНапиши число:", parse_mode="Markdown")
+    await update.callback_query.message.reply_text("*Сколько Вам лет?*\n\nНапишите число:", parse_mode="Markdown")
     return ASK_AGE
 
 
@@ -227,7 +231,7 @@ async def got_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("*Текущий вес в кг?*\n\nНапример: 84", parse_mode="Markdown")
         return ASK_WEIGHT
     except:
-        await update.message.reply_text("Напиши число, например: 28")
+        await update.message.reply_text("Напишите число, например: 28")
         return ASK_AGE
 
 
@@ -239,7 +243,7 @@ async def got_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("*Рост в см?*\n\nНапример: 178", parse_mode="Markdown")
         return ASK_HEIGHT
     except:
-        await update.message.reply_text("Напиши вес, например: 84")
+        await update.message.reply_text("Напишите вес, например: 84")
         return ASK_WEIGHT
 
 
@@ -258,7 +262,7 @@ async def got_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]))
         return ASK_GOAL
     except:
-        await update.message.reply_text("Напиши рост в см, например: 178")
+        await update.message.reply_text("Напишите рост в см, например: 178")
         return ASK_HEIGHT
 
 
@@ -273,12 +277,13 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     arch_key = context.user_data.get("arch_key", "emotional_eater")
     arch = ARCHETYPES.get(arch_key, ARCHETYPES["emotional_eater"])
 
-    await update.callback_query.message.reply_text("Считаю твой результат... ⏳")
+    await update.callback_query.message.reply_text("Считаю Ваш результат... ⏳")
 
     f = calc(w, h, goal)
     context.user_data["forecast"] = f
 
     await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
+    await asyncio.sleep(1.2)
     await update.callback_query.message.reply_text(
         f"*📊 Прогноз на 8 недель:*\n\n"
         f"Сейчас: *{f['cw']} кг*, ИМТ *{f['cb']}*\n\n"
@@ -287,9 +292,11 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"→ ИМТ: *{f['b2']}*\n"
         f"→ Объём: *{f['waist']}*\n"
         f"→ Энергия: {f['en']}\n\n"
-        f"_На основе твоих параметров и средних результатов участников с похожим профилем._",
+        f"_На основе Ваших параметров и средних результатов участников с похожим профилем._",
         parse_mode="Markdown")
+    await asyncio.sleep(1.2)
     await update.callback_query.message.reply_text(arch["tools"])
+    await asyncio.sleep(1.5)
 
     uid = update.callback_query.from_user.id
     await update.callback_query.message.reply_text(
@@ -330,13 +337,13 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("Что важнее всего узнать?", reply_markup=more_kb())
+    await update.callback_query.message.reply_text("Что Вам важнее всего узнать?", reply_markup=more_kb())
 
 
 async def cb_i_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text(
-        "*О нас и команде*\n\n9 лет. 55 000+ участников.\nНаучный подход — алгоритмы на основе ВОЗ.\n\nМы меняем причину, по которой у тебя не получалось.",
+        "*О нас и команде*\n\n9 лет. 55 000+ участников.\nНаучный подход — алгоритмы на основе ВОЗ.\n\nМы меняем причину, по которой у Вас не получалось.",
         parse_mode="Markdown", reply_markup=pay_kb())
 
 
@@ -362,7 +369,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     arch = ARCHETYPES.get(arch_key)
     txt = "📋 *Главное меню FitState*\n\n"
     if arch and f:
-        txt += f"Твой тип: *{arch['emoji']} {arch['name']}*\nПрогноз: {f['wr']} за 8 недель\n\n"
+        txt += f"Ваш тип: *{arch['emoji']} {arch['name']}*\nПрогноз: {f['wr']} за 8 недель\n\n"
     await update.message.reply_text(txt, parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 Мой результат", callback_data="my_res")],
@@ -380,10 +387,10 @@ async def cb_my_res(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if arch and f:
         await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
         await update.callback_query.message.reply_text(
-            f"*Твой тип:* {arch['emoji']} {arch['name']}\n*Прогноз:* {f['wr']} ({f['ch']}) за 8 недель",
+            f"*Ваш тип:* {arch['emoji']} {arch['name']}\n*Прогноз:* {f['wr']} ({f['ch']}) за 8 недель",
             parse_mode="Markdown")
     else:
-        await update.callback_query.message.reply_text("Пройди тест:\n👉 https://vezuncheg.github.io/fitstate")
+        await update.callback_query.message.reply_text("Пройдите тест:\n👉 https://vezuncheg.github.io/fitstate")
 
 
 def main():
