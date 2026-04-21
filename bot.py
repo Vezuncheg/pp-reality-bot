@@ -102,8 +102,8 @@ def more_kb():
 async def send_photo_url(bot, chat_id, url, caption=None):
     """Скачивает фото и отправляет как файл — обходит ограничение Telegram на GitHub URLs"""
     import io
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, follow_redirects=True, timeout=15)
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(url, follow_redirects=True)
         r.raise_for_status()
     bio = io.BytesIO(r.content)
     bio.name = url.split("/")[-1]
@@ -114,17 +114,21 @@ async def send_photo_url(bot, chat_id, url, caption=None):
 
 
 async def send_media_group_urls(bot, chat_id, urls):
-    """Отправляет несколько фото одним сообщением (медиагруппа)"""
+    """Скачивает фото параллельно и отправляет медиагруппой"""
     import io
-    media = []
-    for url in urls:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, follow_redirects=True, timeout=15)
+    import asyncio as _asyncio
+
+    async def fetch(url):
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(url, follow_redirects=True)
             r.raise_for_status()
-        bio = io.BytesIO(r.content)
-        bio.name = url.split("/")[-1]
-        media.append(InputMediaPhoto(media=bio))
-    await bot.send_media_group(chat_id=chat_id, media=media)
+            bio = io.BytesIO(r.content)
+            bio.name = url.split("/")[-1]
+            return bio
+
+    bios = await _asyncio.gather(*[fetch(u) for u in urls])
+    media = [InputMediaPhoto(media=bio) for bio in bios]
+    await bot.send_media_group(chat_id=chat_id, media=media, write_timeout=60, read_timeout=60, connect_timeout=30)
 
 
 async def schedule_dojim(uid, context):
