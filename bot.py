@@ -122,7 +122,7 @@ async def schedule_dojim(uid, context):
             "Пока Вы думаете над решением, хочу рассказать Вам кое-что важное.\n\n"
             "Не про программу. Про человека, который её создал."
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(5)
 
         # Фото — коллаж по годам
         await ctx.bot.send_photo(
@@ -130,7 +130,7 @@ async def schedule_dojim(uid, context):
             photo=f"{PHOTOS_URL}/ivan_years.jpeg",
             caption="Иван Самохин. 2016 → 2020 → 2022 → 2023 → 2024 → 2025\n\nНи разу за эти годы не было анаболиков. Только привычки."
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(7)
 
         # Сообщение 2 — история
         await ctx.bot.send_message(
@@ -150,7 +150,7 @@ async def schedule_dojim(uid, context):
             "а системой. Такой же привычной, как почистить зубы.",
             parse_mode="Markdown"
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(15)
 
         # Фото — до/после
         await ctx.bot.send_photo(
@@ -158,7 +158,7 @@ async def schedule_dojim(uid, context):
             photo=f"{PHOTOS_URL}/ivan_before_after.jpeg",
             caption="2010 — худой, без формы. Через 20 дней работы — уже другой человек.\n\nВопрос не в генетике. Вопрос в количестве попыток и в том, кем ты становишься в процессе."
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(7)
 
         # Сообщение 3 — подкаст и книги
         await ctx.bot.send_message(
@@ -174,7 +174,7 @@ async def schedule_dojim(uid, context):
             "Всё это вылилось в две книги о здоровье и состоянии.",
             parse_mode="Markdown"
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(12)
 
         # Фото — книги и канал
         await ctx.bot.send_photo(
@@ -182,21 +182,21 @@ async def schedule_dojim(uid, context):
             photo=f"{PHOTOS_URL}/book_sostoyanie.jpeg",
             caption="«Состояние» — книга о том, как вернуть себя, жить из сердца и найти своё предназначение"
         )
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(5)
 
         await ctx.bot.send_photo(
             uid,
             photo=f"{PHOTOS_URL}/book_sostoyanie2.png",
             caption="«Состояние 2.0» — для тех, кто устал сливать энергию на ерунду и хочет навести порядок в голове, теле и жизни"
         )
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(5)
 
         await ctx.bot.send_photo(
             uid,
             photo=f"{PHOTOS_URL}/youtube_channel.jpeg",
             caption="YouTube «Состояние — Иван Самохин» · 130 000 подписчиков · 405 видео\n@ivan_samohin"
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(7)
 
         # Сообщение 4 — почему не тренер и не врач
         await ctx.bot.send_message(
@@ -215,7 +215,7 @@ async def schedule_dojim(uid, context):
             "Вот уже 24 года это работает.",
             parse_mode="Markdown"
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(15)
 
         # Сообщение 5 — результат 28 дней и призыв
         await ctx.bot.send_message(
@@ -232,7 +232,7 @@ async def schedule_dojim(uid, context):
             "когда всё летит к чертям.",
             parse_mode="Markdown"
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(10)
 
         await ctx.bot.send_message(
             uid,
@@ -280,11 +280,12 @@ async def schedule_dojim(uid, context):
             ])
         )
 
-    jq.run_once(d1h,    3600,    name=f"d1h_{uid}")
-    jq.run_once(block1, 86400,   name=f"b1_{uid}")
-    jq.run_once(block2, 172800,  name=f"b2_{uid}")
-    jq.run_once(block3, 259200,  name=f"b3_{uid}")
-    jq.run_once(final,  432000,  name=f"fin_{uid}")
+    # ── ТЕСТОВЫЕ ТАЙМИНГИ (заменить на боевые после проверки) ──
+    jq.run_once(d1h,    60,   name=f"d1h_{uid}")   # 1 мин (боевой: 3600)
+    jq.run_once(block1, 120,  name=f"b1_{uid}")    # 2 мин (боевой: 86400)
+    jq.run_once(block2, 180,  name=f"b2_{uid}")    # 3 мин (боевой: 172800)
+    jq.run_once(block3, 240,  name=f"b3_{uid}")    # 4 мин (боевой: 259200)
+    jq.run_once(final,  300,  name=f"fin_{uid}")   # 5 мин (боевой: 432000)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
