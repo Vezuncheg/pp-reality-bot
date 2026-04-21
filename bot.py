@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -98,6 +99,20 @@ def more_kb():
     ])
 
 
+async def send_photo_url(bot, chat_id, url, caption=None):
+    """Скачивает фото и отправляет как файл — обходит ограничение Telegram на GitHub URLs"""
+    import io
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, follow_redirects=True, timeout=15)
+        r.raise_for_status()
+    bio = io.BytesIO(r.content)
+    bio.name = url.split("/")[-1]
+    if caption:
+        await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
+    else:
+        await bot.send_photo(chat_id=chat_id, photo=bio)
+
+
 async def schedule_dojim(uid, context):
     jq = context.application.job_queue
     if not jq:
@@ -153,9 +168,7 @@ async def schedule_dojim(uid, context):
         await asyncio.sleep(20)
 
         # Фото 1 — коллаж по годам
-        await ctx.bot.send_photo(uid,
-            photo=f"{PHOTOS_URL}/ivan_years.jpeg"
-        )
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_years.jpeg")
         await asyncio.sleep(20)
 
         # Часть 2 — подкаст и книги
@@ -178,21 +191,15 @@ async def schedule_dojim(uid, context):
         await asyncio.sleep(20)
 
         # Фото 2 — книга Состояние
-        await ctx.bot.send_photo(uid,
-            photo=f"{PHOTOS_URL}/book_sostoyanie.jpeg"
-        )
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/book_sostoyanie.jpeg")
         await asyncio.sleep(20)
 
         # Фото 3 — книга Состояние 2.0
-        await ctx.bot.send_photo(uid,
-            photo=f"{PHOTOS_URL}/book_sostoyanie2.png"
-        )
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/book_sostoyanie2.png")
         await asyncio.sleep(20)
 
         # Фото 4 — YouTube канал
-        await ctx.bot.send_photo(uid,
-            photo=f"{PHOTOS_URL}/youtube_channel.jpeg"
-        )
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/youtube_channel.jpeg")
         await asyncio.sleep(20)
 
         # Часть 3 — не тренер и не врач, рациональный путь, марафоны
@@ -233,9 +240,7 @@ async def schedule_dojim(uid, context):
         await asyncio.sleep(20)
 
         # Фото 5 — до/после 28 дней
-        await ctx.bot.send_photo(uid,
-            photo=f"{PHOTOS_URL}/ivan_before_after.jpeg"
-        )
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
         await asyncio.sleep(20)
 
         # Часть 4 — результат и честность + запуск block2 через 1 мин
