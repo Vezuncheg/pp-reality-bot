@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 import httpx
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler
@@ -113,6 +113,20 @@ async def send_photo_url(bot, chat_id, url, caption=None):
         await bot.send_photo(chat_id=chat_id, photo=bio)
 
 
+async def send_media_group_urls(bot, chat_id, urls):
+    """Отправляет несколько фото одним сообщением (медиагруппа)"""
+    import io
+    media = []
+    for url in urls:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, follow_redirects=True, timeout=15)
+            r.raise_for_status()
+        bio = io.BytesIO(r.content)
+        bio.name = url.split("/")[-1]
+        media.append(InputMediaPhoto(media=bio))
+    await bot.send_media_group(chat_id=chat_id, media=media)
+
+
 async def schedule_dojim(uid, context):
     jq = context.application.job_queue
     if not jq:
@@ -132,18 +146,18 @@ async def schedule_dojim(uid, context):
     # ── Блок 1: Об Иване (день 1) ──
     async def block1(ctx):
 
-        # Вступление — подводка
+        # Вступление от команды
         await ctx.bot.send_message(uid,
-            "Любой хороший продукт начинается с человека, который его создал.\n\n"
-            "Прежде чем рассказать Вам о том, что Вас ждёт внутри Реалити — "
-            "хочу познакомить Вас с Иваном Самохиным. Не с его регалиями и цифрами. "
-            "А с его историей. Потому что именно она объясняет, почему этот продукт "
-            "работает так, как работает.\n\n"
+            "Хотим познакомить Вас с человеком, который создал этот продукт.\n\n"
+            "Любой хороший продукт начинается с человека за ним. "
+            "Прежде чем рассказать, что Вас ждёт внутри Реалити — "
+            "хотим поделиться его историей. Не регалиями и цифрами, а тем, "
+            "как он к этому пришёл.\n\n"
             "Читайте от первого лица."
         )
         await asyncio.sleep(20)
 
-        # Часть 1 — детство, история, 24 года
+        # Часть 1 — детство, 24 года, привычки
         await ctx.bot.send_message(uid,
             "В детстве я был слабым ребёнком — постоянно болел, плохой иммунитет. "
             "Таких сейчас называют астеник. При этом я рос в эпоху Сталлоне и Шварценеггера, "
@@ -190,16 +204,12 @@ async def schedule_dojim(uid, context):
         )
         await asyncio.sleep(20)
 
-        # Фото 2 — книга Состояние
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/book_sostoyanie.jpeg")
-        await asyncio.sleep(20)
-
-        # Фото 3 — книга Состояние 2.0
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/book_sostoyanie2.png")
-        await asyncio.sleep(20)
-
-        # Фото 4 — YouTube канал
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/youtube_channel.jpeg")
+        # Фото 2,3,4 — книги и канал медиагруппой (красивая плитка)
+        await send_media_group_urls(ctx.bot, uid, [
+            f"{PHOTOS_URL}/book_sostoyanie.jpeg",
+            f"{PHOTOS_URL}/book_sostoyanie2.png",
+            f"{PHOTOS_URL}/youtube_channel.jpeg",
+        ])
         await asyncio.sleep(20)
 
         # Часть 3 — не тренер и не врач, рациональный путь, марафоны
@@ -243,7 +253,7 @@ async def schedule_dojim(uid, context):
         await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
         await asyncio.sleep(20)
 
-        # Часть 4 — результат и честность + запуск block2 через 1 мин
+        # Часть 4 — результат + закрывающий призыв к действию
         await ctx.bot.send_message(uid,
             "Прямо перед запуском программы я прошёл её в очередной раз сам. "
             "С нуля, всё зафиксировал. И в этот раз просто снял всё на камеру.\n\n"
@@ -256,32 +266,72 @@ async def schedule_dojim(uid, context):
             "У всех разный контекст, разный старт, разная психология.\n\n"
             "Я говорю о другом. О принципах и привычках, которые 24 года позволяют мне выглядеть хорошо "
             "в условиях обычной жизни. С фастфудом, ресторанами, периодами, когда всё летит к чертям — "
-            "но находить причины и силы возвращаться обратно.",
+            "но находить причины и силы возвращаться обратно."
+        )
+        await asyncio.sleep(10)
+
+        # Закрывающий призыв к действию
+        await ctx.bot.send_message(uid,
+            "Вы только что узнали, кто стоит за этой программой и почему его подход работает.\n\n"
+            "Это не очередной марафон с запретами. Это система, которую Иван проверил на себе "
+            "за 24 года — и которую передаёт Вам в формате живого реалити.\n\n"
+            "Старт: *11 мая*. Места ограничены.\n\n"
+            "Если Вы чувствуете, что это то, что Вам нужно — не откладывайте.",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
             ])
         )
 
-        # ── Запускаем block2 через 1 минуту после последнего сообщения ──
+        # Запускаем block2 через 1 минуту после последнего сообщения
         jq = ctx.application.job_queue
         if jq:
-            jq.run_once(block2, 60, name=f"b2_{uid}")   # 1 мин (боевой: 86400)
+            jq.run_once(block2, 60, name=f"b2_{uid}")
 
     # ── Блок 2: Подробно о продукте (день 2) ──
     async def block2(ctx):
-        await ctx.bot.send_message(
-            uid,
-            "[ БЛОК 2 — О ПРОДУКТЕ ]\n\n"
-            "⏳ Здесь будет подробный рассказ о Реалити #ПП от Ивана — "
-            "что внутри, как устроен процесс, почему это работает.",
+
+        # Вступление
+        await ctx.bot.send_message(uid,
+            "☄️ Почему Вы не худеете — и это точно не лень\n\n"
+            "Иван записал урок, который отвечает на главный вопрос: "
+            "почему Вы уже 100 раз начинали, срывались, а вес возвращался."
+        )
+        await asyncio.sleep(20)
+
+        # Что внутри урока
+        await ctx.bot.send_message(uid,
+            "Что внутри:\n\n"
+            "• Почему дело часто не в «силе воли»\n"
+            "• Как худеть без голода и без «есть на 1200»\n"
+            "• Примеры питания на 1500 / 2000 / 2500 / 3000 ккал\n"
+            "• Как вписывать «запрещёнку» — бургер, пиво, шаурму, тирамису — без чувства вины\n\n"
+            "После просмотра Вы:\n\n"
+            "• Поймёте, почему раньше не получалось\n"
+            "• Увидите, какие шаги реально дают результат\n"
+            "• Перестанете ломать себя и начнёте действовать по системе"
+        )
+        await asyncio.sleep(20)
+
+        # Ссылка на урок + призыв
+        await ctx.bot.send_message(uid,
+            "Смотрите урок по ссылке:\n"
+            "👉 https://kinescope.io/hubcbT4t5vnaLVYPC6UjAK\n\n"
+            "─────────────────\n\n"
+            "А всё, о чём говорится в уроке — это основа Реалити #ПП. "
+            "Только не в формате видео, а в формате живого процесса рядом с Иваном и куратором. "
+            "8 недель, каждый день, с Вашим типом и Вашей целью.\n\n"
+            "Старт *11 мая*. Если урок откликнулся — самое время сделать следующий шаг.",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
             ])
         )
-        # ── Запускаем block3 через 1 минуту после последнего сообщения ──
+
+        # Запускаем block3 через 1 минуту после последнего сообщения
         jq = ctx.application.job_queue
         if jq:
-            jq.run_once(block3, 60, name=f"b3_{uid}")   # 1 мин (боевой: 259200)
+            jq.run_once(block3, 60, name=f"b3_{uid}")
 
     # ── Блок 3: Кому подойдёт, а кому нет (день 3) ──
     async def block3(ctx):
