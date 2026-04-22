@@ -68,6 +68,7 @@ def calc(weight, height, goal):
         bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
         return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
                     ch=f"−{lo}–{hi} кг жира",
+                    muscle="+1–2 кг мышц при правильном балансе БЖУ",
                     b2=bmi2,
                     waist=f"минус {lo+1}–{hi-1} см в талии",
                     en="заметно вырастет к 3-й неделе")
@@ -75,6 +76,7 @@ def calc(weight, height, goal):
         return dict(cw=weight, cb=bmi,
                     wr=f"{round(weight+3)}–{round(weight+6)} кг",
                     ch="+3–6 кг мышечной массы",
+                    muscle="жировая прослойка снизится на 1–2%",
                     b2=round(bmi+0.8, 1),
                     waist="больше мышц, рельеф",
                     en="вырастет к 2-й неделе")
@@ -83,6 +85,7 @@ def calc(weight, height, goal):
         bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
         return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
                     ch="−3–5 кг + рельеф и тонус",
+                    muscle="+1–3 кг мышечного тонуса",
                     b2=bmi2,
                     waist="минус 3–5 см, заметный рельеф",
                     en="вырастет уже к концу 1-й недели")
@@ -96,7 +99,8 @@ def visual(f, name):
         f"⬇️  8 недель программы FitState  ⬇️\n\n"
         f"🖼 *ТЫ ЧЕРЕЗ 2 МЕСЯЦА*\n"
         f"Вес: {f['wr']}  |  ИМТ: {f['b2']}\n"
-        f"*{f['ch']}*\n\n"
+        f"*{f['ch']}*\n"
+        f"*{f['muscle']}*\n\n"
         f"→ Объём: {f['waist']}\n"
         f"→ Энергия: {f['en']}\n\n"
         f"_На основе Ваших параметров и средних результатов участников с похожим профилем._"
@@ -497,7 +501,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(1.2)
     await update.message.reply_text(arch["solution"])
     await update.message.reply_text(
-        "Хотите узнать — *каким Вы можете стать за 2 месяца?*\n\nНужно задать пару вопросов.",
+        "Хотите узнать — *каким Вы можете стать за 2 месяца?*\n\nЕсли внедрить одну простую систему.\nЯ задам всего пару вопросов.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Да, хочу узнать →", callback_data="go")],
