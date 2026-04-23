@@ -139,16 +139,27 @@ async def send_photo_url(bot, chat_id, url, caption=None):
 
 
 async def send_media_group_urls(bot, chat_id, urls):
-    """Скачивает фото параллельно и отправляет медиагруппой. При ошибке отправляет по одному."""
+    """Скачивает фото параллельно, конвертирует PNG→JPEG и отправляет медиагруппой."""
     import io
     import asyncio as _asyncio
+    from PIL import Image
 
     async def fetch(url):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(url, follow_redirects=True)
                 r.raise_for_status()
-                bio = io.BytesIO(r.content)
+            data = r.content
+            # Конвертируем PNG в JPEG чтобы Telegram не падал на image_process_failed
+            if url.lower().endswith('.png'):
+                img = Image.open(io.BytesIO(data)).convert('RGB')
+                buf = io.BytesIO()
+                img.save(buf, format='JPEG', quality=92)
+                buf.seek(0)
+                buf.name = url.split("/")[-1].replace('.png', '.jpg')
+                return buf
+            else:
+                bio = io.BytesIO(data)
                 bio.name = url.split("/")[-1]
                 return bio
         except Exception as e:
@@ -662,7 +673,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     arch_key = context.user_data.get("arch_key")
     f = context.user_data.get("forecast")
     arch = ARCHETYPES.get(arch_key)
-    txt = "📋 *Главное меню FitState*\n\n"
+    txt = "📋 *Реалити #ПП «Программа Преображения»*\n\n"
     if arch and f:
         txt += f"Ваш тип: *{arch['emoji']} {arch['name']}*\nПрогноз: {f['wr']} за 8 недель\n\n"
     await update.message.reply_text(txt, parse_mode="Markdown",
@@ -720,7 +731,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_i_results,pattern="^i_results$"))
     app.add_handler(CallbackQueryHandler(cb_my_res,   pattern="^my_res$"))
 
-    logger.info("FitState bot started ✅")
+    logger.info("Программа Преображения bot started ✅")
     app.run_polling(drop_pending_updates=True)
 
 
