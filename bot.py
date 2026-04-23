@@ -259,8 +259,8 @@ async def schedule_dojim(uid, context):
         )
         await asyncio.sleep(20)
 
-        # Фото — до/после 28 дней
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
+        # Фото — результаты 28 дней (новое фото с реальными цифрами)
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_results.png")
         await asyncio.sleep(20)
 
         # Часть 7 — реальные цифры
