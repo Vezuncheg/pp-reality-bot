@@ -120,35 +120,47 @@ def more_kb():
 
 
 async def send_photo_url(bot, chat_id, url, caption=None):
-    """Скачивает фото и отправляет как файл — обходит ограничение Telegram на GitHub URLs"""
+    """Скачивает фото и отправляет как файл. При ошибке логирует и продолжает."""
     import io
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(url, follow_redirects=True)
-        r.raise_for_status()
-    bio = io.BytesIO(r.content)
-    bio.name = url.split("/")[-1]
-    if caption:
-        await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
-    else:
-        await bot.send_photo(chat_id=chat_id, photo=bio)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(url, follow_redirects=True)
+            r.raise_for_status()
+        bio = io.BytesIO(r.content)
+        bio.name = url.split("/")[-1]
+        if caption:
+            await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
+        else:
+            await bot.send_photo(chat_id=chat_id, photo=bio)
+    except Exception as e:
+        logger.error(f"Не удалось отправить фото {url}: {e}")
+        # Отправляем текстовое уведомление вместо фото чтобы не прерывать цепочку
+        await bot.send_message(chat_id=chat_id, text="📸 [фото временно недоступно]")
 
 
 async def send_media_group_urls(bot, chat_id, urls):
-    """Скачивает фото параллельно и отправляет медиагруппой"""
+    """Скачивает фото параллельно и отправляет медиагруппой. При ошибке отправляет по одному."""
     import io
     import asyncio as _asyncio
 
     async def fetch(url):
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(url, follow_redirects=True)
-            r.raise_for_status()
-            bio = io.BytesIO(r.content)
-            bio.name = url.split("/")[-1]
-            return bio
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url, follow_redirects=True)
+                r.raise_for_status()
+                bio = io.BytesIO(r.content)
+                bio.name = url.split("/")[-1]
+                return bio
+        except Exception as e:
+            logger.error(f"Не удалось скачать фото {url}: {e}")
+            return None
 
     bios = await _asyncio.gather(*[fetch(u) for u in urls])
-    media = [InputMediaPhoto(media=bio) for bio in bios]
-    await bot.send_media_group(chat_id=chat_id, media=media, write_timeout=60, read_timeout=60, connect_timeout=30)
+    valid = [InputMediaPhoto(media=bio) for bio in bios if bio is not None]
+    if valid:
+        await bot.send_media_group(chat_id=chat_id, media=valid, write_timeout=60, read_timeout=60, connect_timeout=30)
+    else:
+        logger.error("Все фото в медиагруппе недоступны")
 
 
 async def schedule_dojim(uid, context):
