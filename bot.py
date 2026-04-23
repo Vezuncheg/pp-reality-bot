@@ -232,7 +232,7 @@ async def schedule_dojim(uid, context):
         # Фото — книги и канал медиагруппой
         await send_media_group_urls(ctx.bot, uid, [
             f"{PHOTOS_URL}/book_sostoyanie.jpeg",
-            f"{PHOTOS_URL}/book_sostoyanie2.png",
+            f"{PHOTOS_URL}/book_sostoyanie2.jpeg",
             f"{PHOTOS_URL}/youtube_channel.jpeg",
         ])
         await asyncio.sleep(20)
