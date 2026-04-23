@@ -167,11 +167,30 @@ async def send_media_group_urls(bot, chat_id, urls):
             return None
 
     bios = await _asyncio.gather(*[fetch(u) for u in urls])
-    valid = [InputMediaPhoto(media=bio) for bio in bios if bio is not None]
-    if valid:
-        await bot.send_media_group(chat_id=chat_id, media=valid, write_timeout=60, read_timeout=60, connect_timeout=30)
-    else:
+    valid_bios = [bio for bio in bios if bio is not None]
+
+    if not valid_bios:
         logger.error("Все фото в медиагруппе недоступны")
+        return
+
+    # Пробуем отправить медиагруппой
+    try:
+        media = [InputMediaPhoto(media=bio) for bio in valid_bios]
+        await bot.send_media_group(
+            chat_id=chat_id, media=media,
+            write_timeout=120, read_timeout=120, connect_timeout=60
+        )
+    except Exception as e:
+        logger.error(f"Медиагруппа не отправилась ({e}), отправляем по одному")
+        # Fallback — отправляем каждое фото отдельно
+        for bio in valid_bios:
+            try:
+                bio.seek(0)
+                await bot.send_photo(chat_id=chat_id, photo=bio,
+                    write_timeout=60, read_timeout=60)
+                await asyncio.sleep(1)
+            except Exception as e2:
+                logger.error(f"Фото не отправилось: {e2}")
 
 
 async def schedule_dojim(uid, context):
