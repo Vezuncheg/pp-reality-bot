@@ -96,7 +96,7 @@ def visual(f, name):
         f"🖼 *ТЫ СЕЙЧАС*\n"
         f"Вес: {f['cw']} кг  |  ИМТ: {f['cb']}\n"
         f"_{name}_\n\n"
-        f"⬇️  8 недель программы FitState  ⬇️\n\n"
+        f"⬇️ 8 недель Реалити #ПП «Программа Преображения» ⬇️\n\n"
         f"🖼 *ТЫ ЧЕРЕЗ 2 МЕСЯЦА*\n"
         f"Вес: {f['wr']}  |  ИМТ: {f['b2']}\n"
         f"*{f['ch']}*\n"
@@ -113,9 +113,10 @@ def pay_kb():
 
 def more_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("О нас и команде", callback_data="i_about")],
-        [InlineKeyboardButton("Программа подробно", callback_data="i_program")],
-        [InlineKeyboardButton("Результаты участников", callback_data="i_results")],
+        [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
+        [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
+        [InlineKeyboardButton("✅ Кому подходит, а кому нет?", callback_data="start_b3")],
+        [InlineKeyboardButton("Записаться →", url=PAY_URL)],
     ])
 
 
@@ -198,14 +199,18 @@ async def schedule_dojim(uid, context):
     if not jq:
         return
 
-    # ── Через 1 час: таймер истёк, скидки нет, но запись открыта ──
+    # ── Через 1 час: таймер истёк, предлагаем 3 раздела ──
     async def d1h(ctx):
         await ctx.bot.send_message(
             uid,
-            "Скидка 20% истекла, но запись в Реалити ещё открыта.\n\n"
-            "👇 Успейте занять место по стандартной цене:",
+            "Время скидки истекло, но мы не прощаемся — только начинаем знакомиться.\n\n"
+            "Прежде чем принять решение, хочу рассказать Вам больше о том, что стоит за Реалити #ПП.\n\n"
+            "Выберите, с чего начать 👇",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]
+                [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
+                [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
+                [InlineKeyboardButton("✅ Кому подходит реалити, а кому нет?", callback_data="start_b3")],
+                [InlineKeyboardButton("Записаться →", url=PAY_URL)],
             ])
         )
 
@@ -489,10 +494,7 @@ async def schedule_dojim(uid, context):
     async def final(ctx):
         await ctx.bot.send_message(
             uid,
-            "*Реалити уже идёт. Места заканчиваются.*\n\n"
-            "Вы уже знаете свой тип и свою причину.\n"
-            "Осталось сделать один шаг — выбрать тариф и начать.\n\n"
-            "Старт: *11 мая*",
+            "*Реалити уже скоро!*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]
@@ -619,7 +621,7 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["forecast"] = f
 
     await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
-    await asyncio.sleep(180)  # пауза 3 минуты перед следующим сообщением
+    await asyncio.sleep(60)  # пауза 1 минута перед следующим сообщением
     await update.callback_query.message.reply_text(arch["tools"])
     await asyncio.sleep(1.5)
 
@@ -665,27 +667,54 @@ async def cb_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.message.reply_text("Что Вам важнее всего узнать?", reply_markup=more_kb())
 
 
-async def cb_i_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _launch_block(update, context, block_key, auto_job_name, greeting):
+    """Запускает блок по кнопке с защитой от повтора (правка 4)."""
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text(
-        "*О нас и команде*\n\n9 лет. 55 000+ участников.\nНаучный подход — алгоритмы на основе ВОЗ.\n\nМы меняем причину, по которой у Вас не получалось.",
-        parse_mode="Markdown", reply_markup=pay_kb())
+    uid = update.callback_query.from_user.id
+    jq = context.application.job_queue
+    if jq:
+        for job in jq.get_jobs_by_name(f"{auto_job_name}_{uid}"):
+            job.schedule_removal()
+            logger.info(f"Отменён автозапуск {auto_job_name}_{uid}")
+    sent = context.user_data.setdefault("blocks_sent", set())
+    if block_key in sent:
+        await update.callback_query.message.reply_text(
+            "Вы уже читали этот раздел. Записаться можно здесь:",
+            reply_markup=pay_kb()
+        )
+        return
+    sent.add(block_key)
+    await update.callback_query.message.reply_text(greeting)
+    if jq:
+        bot = context.bot
+        if block_key == "b1":
+            jq.run_once(lambda ctx: _exec_block1(uid, ctx.bot, ctx.application.job_queue),
+                        when=2, name=f"man_b1_{uid}")
+        elif block_key == "b2":
+            jq.run_once(lambda ctx: _exec_block2(uid, ctx.bot, ctx.application.job_queue),
+                        when=2, name=f"man_b2_{uid}")
+        elif block_key == "b3":
+            jq.run_once(lambda ctx: _exec_block3(uid, ctx.bot, ctx.application.job_queue),
+                        when=2, name=f"man_b3_{uid}")
 
+
+async def cb_start_b1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _launch_block(update, context, "b1", "b1", "Сейчас пришлю историю Ивана 👇")
+
+async def cb_start_b2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _launch_block(update, context, "b2", "b2", "Сейчас расскажу, что вас ждёт внутри 👇")
+
+async def cb_start_b3(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _launch_block(update, context, "b3", "b3", "Сейчас расскажу честно — кому подойдёт 👇")
+
+async def cb_i_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cb_start_b1(update, context)
 
 async def cb_i_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text(
-        "*Программа по неделям:*\n\n📍 1–2: диагностика и настройка\n📍 3–4: первые результаты\n📍 5–6: закрепление\n📍 7–8: финальный рывок + план на после",
-        parse_mode="Markdown", reply_markup=pay_kb())
-
+    await cb_start_b2(update, context)
 
 async def cb_i_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    arch_key = context.user_data.get("arch_key", "emotional_eater")
-    arch = ARCHETYPES.get(arch_key, ARCHETYPES["emotional_eater"])
-    await update.callback_query.message.reply_text(
-        f"*Результаты участников:*\n\n{arch['proof']}",
-        parse_mode="Markdown", reply_markup=pay_kb())
+    await cb_start_b3(update, context)
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -698,8 +727,9 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 Мой результат", callback_data="my_res")],
-            [InlineKeyboardButton("📖 О программе", callback_data="i_program")],
-            [InlineKeyboardButton("🏆 Результаты участников", callback_data="i_results")],
+            [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
+            [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
+            [InlineKeyboardButton("✅ Кому подходит, а кому нет?", callback_data="start_b3")],
             [InlineKeyboardButton("💳 Записаться", url=PAYMENT_URL)],
         ]))
 
@@ -716,6 +746,170 @@ async def cb_my_res(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown")
     else:
         await update.callback_query.message.reply_text("Пройдите тест:\n👉 https://vezuncheg.github.io/fitstate")
+
+
+async def _exec_block1(uid, bot, jq):
+    P = PHOTOS_URL
+    async def s(text, **kw): await bot.send_message(chat_id=uid, text=text, **kw)
+    async def ph(url): await send_photo_url(bot, uid, url)
+    async def mg(urls): await send_media_group_urls(bot, uid, urls)
+
+    await s("*Кто такой Иван Самохин?*\n"
+            "Создатель Реалити #ПП «Программа Преображения» 👇\n\n"
+            "Вы знаете его как создателя и ведущего подкаста «Состояние» "
+            "со 155 000 подписчиков на YouTube и 65+ миллионами просмотров.\n\n"
+            "Но сейчас Вы узнаете про его путь в преображении тела на протяжении 24 лет. "
+            "Иван расскажет свою историю 👇", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await s("*НАЧАЛО*\n\n"
+            "В детстве я был слабым ребёнком — постоянно болел, плохой иммунитет. "
+            "Таких сейчас называют астеник. Можно уверенно сказать, что я был дрыщом в 14 лет.\n\n"
+            "*«У тебя просто генетика» — самый вредный миф*\n\n"
+            "Когда люди видят мой результат сегодня, говорят: «Ну у тебя гены». "
+            "Я начал качаться под впечатлением от Сталлоне и Шварценеггера, как и многие из вас.\n\n"
+            "Важна не генетика, а привычки. За последние три месяца я не пропустил ни одной "
+            "из трёх тренировок в неделю. Не потому что сверхчеловек — а потому что это "
+            "стало автоматикой, как чистить зубы.", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await ph(f"{P}/ivan_years.jpeg")
+    await asyncio.sleep(20)
+    await s("*Почему я не тренер (и почему это вам выгодно)*\n\n"
+            "За 24 года я перепробовал сотни тренеров в разных странах.\n\n"
+            "Большинство из них:\n"
+            "→ Рано или поздно предлагают анаболики (им нужен быстрый кейс, а не ваше здоровье)\n"
+            "→ Живут в зале по 12 часов, питаются из контейнеров\n"
+            "→ Видят только вес и процент жира, забывая про ментальное состояние\n\n"
+            "Я не тренер и не врач. Я практик с 24-летним стажем, который провёл 60+ интервью "
+            "с учёными, генетиками и эндокринологами.", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await mg([f"{P}/book_sostoyanie.jpeg", f"{P}/book_sostoyanie2.jpeg", f"{P}/youtube_channel.jpeg"])
+    await asyncio.sleep(20)
+    await s("*Почему ваши тренировки не работают (и что делать вместо этого)*\n\n"
+            "Вы знаете это чувство: купили абонемент, пошли три недели, потом работа, "
+            "командировка, «всё потом нагоню». Или сели на марафон — отказались от всего, "
+            "а через месяц вернулись с лишними килограммами и чувством вины.\n\n"
+            "Я проходил это. Ломал ногу, пропадал на месяцы. И каждый раз возвращался "
+            "к форме не благодаря «железной воле», а благодаря системе.", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await s("*Система против марафонов*\n\n"
+            "Марафон вырывает вас из жизни: резкие запреты, режим, отказ от семьи и работы. "
+            "Потом — обязательный откат.", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await s("*Мой подход другой.*\n\n"
+            "Я работаю каждый день, ем в ресторанах, бывает и фастфуд, перелёты, дедлайны. "
+            "И при этом уже 24 года держу форму.\n\n"
+            "Секрет не в отказах, а в пропорциях. Как в хорошем супе — важно соотношение "
+            "ингредиентов, а не голодовка.", parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await ph(f"{P}/ivan_results.png")
+    await asyncio.sleep(20)
+    await s("*Реальные цифры (снято на камеру)*\n\n"
+            "Перед запуском я прошёл программу сам. С нуля, зафиксировав всё:\n\n"
+            "За 28 дней:\n"
+            "→ −4,3 кг общего веса\n"
+            "→ −2,2 кг жировой массы\n"
+            "→ −1,8% телесного жира\n\n"
+            "При этом я не сидел на воде и огурцах. Ходил в рестораны, работал, жил нормально.",
+            parse_mode="Markdown")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="*Что вы получите*\n\n"
+             "Это не очередной «стань качком за месяц». Это система привычек, которая:\n\n"
+             "→ Работает в условиях перегрузов и командировок\n"
+             "→ Не требует жить в зале и носить еду в контейнерах\n"
+             "→ Учитывает ваше ментальное и физическое здоровье как единое целое\n"
+             "→ Остаётся с вами навсегда, а не на 28 дней\n\n"
+             "*Старт программы: 11 мая.*\n\n"
+             "Места ограничены. Если вы устали от тренеров-зомби и марафонов — "
+             "*пришло время для системы, которая работает в реальной жизни.\n"
+             "Если Вы чувствуете, что это то, что Вам нужно — не откладывайте.*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]]))
+
+
+async def _exec_block2(uid, bot, jq):
+    await bot.send_message(chat_id=uid,
+        text="☄️ Почему Вы не худеете — и это точно не лень\n\n"
+             "Иван записал урок, который отвечает на главный вопрос: "
+             "почему Вы уже 100 раз начинали, срывались, а вес возвращался.")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="Что внутри:\n\n"
+             "• Почему дело часто не в «силе воли»\n"
+             "• Как худеть без голода и без «есть на 1200»\n"
+             "• Примеры питания на 1500 / 2000 / 2500 / 3000 ккал\n"
+             "• Как вписывать «запрещёнку» — бургер, пиво, шаурму — без чувства вины\n\n"
+             "После просмотра Вы:\n\n"
+             "• Поймёте, почему раньше не получалось\n"
+             "• Увидите, какие шаги реально дают результат\n"
+             "• Перестанете ломать себя и начнёте действовать по системе")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="Смотрите урок по ссылке:\n"
+             "👉 https://kinescope.io/hubcbT4t5vnaLVYPC6UjAK\n\n"
+             "─────────────────\n\n"
+             "А всё, о чём говорится в уроке — это основа Реалити #ПП. "
+             "8 недель, каждый день, с Вашим типом и Вашей целью.\n\n"
+             "Старт *11 мая*. Если урок откликнулся — самое время сделать следующий шаг.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]]))
+
+
+async def _exec_block3(uid, bot, jq):
+    await bot.send_message(chat_id=uid,
+        text="Хотим быть с Вами честными.\n\n"
+             "Реалити #ПП подходит не всем — и это важно понять до принятия решения. "
+             "Прочитайте внимательно: это сэкономит Вам время и деньги, "
+             "если программа действительно не для Вас.")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="🚫 Реалити не для Вас, если:\n\n"
+             "❌ Вы ищете жёсткую диету с полным списком запретов — "
+             "здесь нет запрещённых продуктов, только понимание пропорций\n\n"
+             "❌ Вы хотите «минус 10 кг за неделю» — "
+             "таких результатов не бывает без вреда для здоровья\n\n"
+             "❌ Вы ждёте волшебную таблетку — "
+             "здесь нужно участвовать, смотреть, применять")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="✅ Реалити создано для Вас, если:\n\n"
+             "✔ Нет времени на сложные многочасовые программы\n"
+             "✔ Устали и в стрессе — хотите выстроить режим, не ломая себя\n"
+             "✔ Проходили через срывы и качели веса и хотите выбраться из круга\n"
+             "✔ Хотите форму без фанатизма — без лотков с едой\n"
+             "✔ Хотите результат, который вписывается в обычную жизнь")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="Что Вы почувствуете через 28 дней:\n\n"
+             "✔ Снижение веса и объёмов — без голода и срывов\n"
+             "✔ Больше энергии — уже к концу первой недели\n"
+             "✔ Меньше тяги к вредной еде\n"
+             "✔ Уверенность в своём теле\n"
+             "✔ Ощущение контроля — над едой, активностью, своим днём\n"
+             "✔ Привычки, которые остаются с Вами навсегда")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="Я уже прошёл этот путь.\n\n"
+             "Эти 28 дней — не теория и не план. "
+             "Это реальный процесс, который я прошёл сам и записал день за днём. "
+             "Специально для того, чтобы Вам было легче пройти его сейчас.")
+    await asyncio.sleep(20)
+    await send_photo_url(bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
+    await asyncio.sleep(20)
+    await bot.send_message(chat_id=uid,
+        text="За 28 дней:\n"
+             "→ −4,3 кг веса\n"
+             "→ −2,2 кг жировой массы\n"
+             "→ −1,8% телесного жира\n\n"
+             "Без анаболиков. Без жёстких ограничений. В условиях обычной жизни.\n\n"
+             "─────────────────\n\n"
+             "Если Вы узнали себя в списке тех, кому это подойдёт — "
+             "не нужно больше думать и откладывать. "
+             "Каждый день ожидания — это ещё один день в том же круге.\n\n"
+             "*Старт 11 мая. Места ограничены.*\n\n"
+             "Сделайте шаг прямо сейчас — пока есть возможность.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Записаться в Реалити →", url=PAY_URL)]]))
 
 
 def main():
@@ -744,11 +938,14 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("menu", cmd_menu))
-    app.add_handler(CallbackQueryHandler(cb_more,     pattern="^more_info$"))
-    app.add_handler(CallbackQueryHandler(cb_i_about,  pattern="^i_about$"))
-    app.add_handler(CallbackQueryHandler(cb_i_program,pattern="^i_program$"))
-    app.add_handler(CallbackQueryHandler(cb_i_results,pattern="^i_results$"))
-    app.add_handler(CallbackQueryHandler(cb_my_res,   pattern="^my_res$"))
+    app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
+    app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
+    app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
+    app.add_handler(CallbackQueryHandler(cb_start_b3,  pattern="^start_b3$"))
+    app.add_handler(CallbackQueryHandler(cb_i_about,   pattern="^i_about$"))
+    app.add_handler(CallbackQueryHandler(cb_i_program, pattern="^i_program$"))
+    app.add_handler(CallbackQueryHandler(cb_i_results, pattern="^i_results$"))
+    app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
 
     logger.info("Программа Преображения bot started ✅")
     app.run_polling(drop_pending_updates=True)
