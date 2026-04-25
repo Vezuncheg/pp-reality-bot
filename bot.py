@@ -1000,9 +1000,8 @@ def main():
         return
 
     from telegram import BotCommand
-    app = Application.builder().token(TOKEN).build()
 
-    async def set_commands(application):
+    async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("myresult",  "📊 Мой результат теста"),
             BotCommand("ivan",      "📖 История Ивана Самохина"),
@@ -1010,8 +1009,9 @@ def main():
             BotCommand("fitsfor",   "✅ Кому подходит реалити"),
             BotCommand("menu",      "📋 Главное меню"),
         ])
+        logger.info("Команды меню установлены ✅")
 
-    app.post_init = set_commands
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
