@@ -322,6 +322,8 @@ async def schedule_dojim(uid, context):
             parse_mode="Markdown"
         )
         await asyncio.sleep(20)
+        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
+        await asyncio.sleep(20)
 
         # Часть 8 — что вы получите + закрывающий CTA
         await ctx.bot.send_message(uid,
@@ -812,6 +814,8 @@ async def _exec_block1(uid, bot, jq):
             "При этом я не сидел на воде и огурцах. Ходил в рестораны, работал, жил нормально.",
             parse_mode="Markdown")
     await asyncio.sleep(20)
+    await ph(f"{P}/ivan_before_after.jpeg")
+    await asyncio.sleep(20)
     await bot.send_message(chat_id=uid,
         text="*Что вы получите*\n\n"
              "Это не очередной «стань качком за месяц». Это система привычек, которая:\n\n"
@@ -912,12 +916,102 @@ async def _exec_block3(uid, bot, jq):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Записаться в Реалити →", url=PAY_URL)]]))
 
 
+async def cmd_ivan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /ivan — история Ивана Самохина."""
+    uid = update.effective_user.id
+    sent = context.user_data.setdefault("blocks_sent", set())
+    if "b1" in sent:
+        await update.message.reply_text(
+            "Вы уже читали этот раздел. Записаться можно здесь:",
+            reply_markup=pay_kb()
+        )
+        return
+    sent.add("b1")
+    await update.message.reply_text("Сейчас пришлю историю Ивана 👇")
+    jq = context.application.job_queue
+    if jq:
+        jq.run_once(lambda ctx: _exec_block1(uid, ctx.bot, ctx.application.job_queue),
+                    when=2, name=f"cmd_b1_{uid}")
+
+
+async def cmd_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /product — что вы получите в реалити."""
+    uid = update.effective_user.id
+    sent = context.user_data.setdefault("blocks_sent", set())
+    if "b2" in sent:
+        await update.message.reply_text(
+            "Вы уже читали этот раздел. Записаться можно здесь:",
+            reply_markup=pay_kb()
+        )
+        return
+    sent.add("b2")
+    await update.message.reply_text("Сейчас расскажу, что вас ждёт внутри 👇")
+    jq = context.application.job_queue
+    if jq:
+        jq.run_once(lambda ctx: _exec_block2(uid, ctx.bot, ctx.application.job_queue),
+                    when=2, name=f"cmd_b2_{uid}")
+
+
+async def cmd_fitsfor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /fitsfor — кому подходит реалити."""
+    uid = update.effective_user.id
+    sent = context.user_data.setdefault("blocks_sent", set())
+    if "b3" in sent:
+        await update.message.reply_text(
+            "Вы уже читали этот раздел. Записаться можно здесь:",
+            reply_markup=pay_kb()
+        )
+        return
+    sent.add("b3")
+    await update.message.reply_text("Сейчас расскажу честно — кому подойдёт 👇")
+    jq = context.application.job_queue
+    if jq:
+        jq.run_once(lambda ctx: _exec_block3(uid, ctx.bot, ctx.application.job_queue),
+                    when=2, name=f"cmd_b3_{uid}")
+
+
+async def cmd_myresult(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /myresult — показывает результат теста."""
+    arch_key = context.user_data.get("arch_key")
+    f = context.user_data.get("forecast")
+    arch = ARCHETYPES.get(arch_key)
+    if arch and f:
+        await update.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
+        await asyncio.sleep(1)
+        await update.message.reply_text(
+            f"*Ваш тип:* {arch['emoji']} {arch['name']}\n"
+            f"*Прогноз:* {f['wr']} ({f['ch']}) за 8 недель",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
+            ])
+        )
+    else:
+        await update.message.reply_text(
+            "Результат пока не найден. Пройдите тест, чтобы получить персональный разбор:\n\n"
+            "👉 " + QUIZ_URL
+        )
+
+
+
 def main():
     if not TOKEN:
         logger.error("BOT_TOKEN не установлен!")
         return
 
+    from telegram import BotCommand
     app = Application.builder().token(TOKEN).build()
+
+    async def set_commands(application):
+        await application.bot.set_my_commands([
+            BotCommand("myresult",  "📊 Мой результат теста"),
+            BotCommand("ivan",      "📖 История Ивана Самохина"),
+            BotCommand("product",   "💪 Что вы получите в реалити"),
+            BotCommand("fitsfor",   "✅ Кому подходит реалити"),
+            BotCommand("menu",      "📋 Главное меню"),
+        ])
+
+    app.post_init = set_commands
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
@@ -937,7 +1031,11 @@ def main():
     )
 
     app.add_handler(conv)
-    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("menu",      cmd_menu))
+    app.add_handler(CommandHandler("ivan",      cmd_ivan))
+    app.add_handler(CommandHandler("product",   cmd_product))
+    app.add_handler(CommandHandler("fitsfor",   cmd_fitsfor))
+    app.add_handler(CommandHandler("myresult",  cmd_myresult))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
     app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
