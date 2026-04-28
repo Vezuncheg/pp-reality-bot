@@ -121,22 +121,27 @@ def more_kb():
 
 
 async def send_photo_url(bot, chat_id, url, caption=None):
-    """Скачивает фото и отправляет как файл. При ошибке логирует и продолжает."""
+    """Скачивает фото и отправляет как файл. 3 попытки при ошибке."""
     import io
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(url, follow_redirects=True)
-            r.raise_for_status()
-        bio = io.BytesIO(r.content)
-        bio.name = url.split("/")[-1]
-        if caption:
-            await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
-        else:
-            await bot.send_photo(chat_id=chat_id, photo=bio)
-    except Exception as e:
-        logger.error(f"Не удалось отправить фото {url}: {e}")
-        # Отправляем текстовое уведомление вместо фото чтобы не прерывать цепочку
-        await bot.send_message(chat_id=chat_id, text="📸 [фото временно недоступно]")
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url, follow_redirects=True)
+                r.raise_for_status()
+            bio = io.BytesIO(r.content)
+            bio.name = url.split("/")[-1]
+            if caption:
+                await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
+            else:
+                await bot.send_photo(chat_id=chat_id, photo=bio)
+            return  # успех — выходим
+        except Exception as e:
+            logger.warning(f"Попытка {attempt+1}/3 не удалась для {url}: {e}")
+            if attempt < 2:
+                await asyncio.sleep(3)  # пауза перед повтором
+    # Все 3 попытки провалились
+    logger.error(f"Не удалось отправить фото {url} после 3 попыток")
+    await bot.send_message(chat_id=chat_id, text="📸 [фото временно недоступно]")
 
 
 async def send_media_group_urls(bot, chat_id, urls):
