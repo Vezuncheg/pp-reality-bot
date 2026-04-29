@@ -345,10 +345,8 @@ async def schedule_dojim(uid, context):
             ])
         )
 
-        # Запускаем block2 через 1 минуту после последнего сообщения
-        jq = ctx.application.job_queue
-        if jq:
-            jq.run_once(block2, 60, name=f"b2_{uid}")
+        # Запускаем следующий непросмотренный блок
+        await schedule_next_unseen(uid, "b1", ctx)
 
     # ── Блок 2: Подробно о продукте (день 2) ──
     async def block2(ctx):
@@ -682,15 +680,14 @@ async def _launch_block(update, context, block_key, auto_job_name, greeting):
     sent.add(block_key)
     await update.callback_query.message.reply_text(greeting)
     if jq:
-        bot = context.bot
         if block_key == "b1":
-            jq.run_once(lambda ctx: _exec_block1(uid, ctx.bot, ctx.application.job_queue),
+            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b1", ctx),
                         when=2, name=f"man_b1_{uid}")
         elif block_key == "b2":
-            jq.run_once(lambda ctx: _exec_block2(uid, ctx.bot, ctx.application.job_queue),
+            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b2", ctx),
                         when=2, name=f"man_b2_{uid}")
         elif block_key == "b3":
-            jq.run_once(lambda ctx: _exec_block3(uid, ctx.bot, ctx.application.job_queue),
+            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b3", ctx),
                         when=2, name=f"man_b3_{uid}")
 
 
@@ -821,6 +818,10 @@ async def _exec_block1(uid, bot, jq):
              "Если Вы чувствуете, что это то, что Вам нужно — не откладывайте.*",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Записаться в Реалити →", url=f"{PAY_URL}?tg_id={uid}")]]))
+    # Планируем следующий непросмотренный блок
+    await schedule_next_unseen(uid, "b2", jq)
+    # Планируем следующий непросмотренный блок
+    await schedule_next_unseen(uid, "b1", jq)
 
 
 async def _exec_block2(uid, bot, jq):
@@ -903,6 +904,8 @@ async def _exec_block3(uid, bot, jq):
              "Сделайте шаг прямо сейчас — пока есть возможность.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Записаться в Реалити →", url=f"{PAY_URL}?tg_id={uid}")]]))
+    # Планируем следующий непросмотренный блок
+    await schedule_next_unseen(uid, "b3", jq)
 
 
 async def cmd_ivan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -981,6 +984,76 @@ async def cmd_myresult(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👉 " + QUIZ_URL
         )
 
+
+
+async def schedule_next_unseen(uid, current_block, context_or_jq):
+    """После завершения блока запускает следующий непросмотренный через заданное время."""
+    # Получаем job_queue
+    if hasattr(context_or_jq, 'application'):
+        jq = context_or_jq.application.job_queue
+        user_data = context_or_jq.user_data if hasattr(context_or_jq, 'user_data') else {}
+    else:
+        jq = context_or_jq
+        user_data = {}
+
+    if not jq:
+        return
+
+    # Порядок блоков
+    order = ["b1", "b2", "b3", "final"]
+    delay = 60  # тестовый (боевой: 86400)
+
+    # Определяем какие блоки уже отправлены
+    # Берём из хранилища приложения по uid
+    app = jq.application if hasattr(jq, 'application') else None
+    if app and hasattr(app, 'user_data'):
+        sent = app.user_data.get(uid, {}).get("blocks_sent", set())
+    else:
+        sent = set()
+
+    # Помечаем текущий как отправленный
+    sent.add(current_block)
+    if app and hasattr(app, 'user_data'):
+        if uid not in app.user_data:
+            app.user_data[uid] = {}
+        app.user_data[uid]["blocks_sent"] = sent
+
+    # Ищем следующий непросмотренный
+    current_idx = order.index(current_block) if current_block in order else -1
+    for i in range(current_idx + 1, len(order)):
+        next_block = order[i]
+        if next_block not in sent:
+            logger.info(f"Планируем следующий блок {next_block} для uid={uid} через {delay}с")
+
+            async def _run_next(ctx, _block=next_block):
+                await _dispatch_next_block(uid, _block, ctx)
+
+            jq.run_once(_run_next, when=delay, name=f"auto_{next_block}_{uid}")
+            break
+
+
+async def _dispatch_next_block(uid, block_key, ctx):
+    """Запускает нужный блок и помечает как просмотренный."""
+    bot = ctx.bot
+    jq = ctx.application.job_queue
+
+    # Помечаем как отправленный
+    if hasattr(ctx.application, 'user_data'):
+        if uid not in ctx.application.user_data:
+            ctx.application.user_data[uid] = {}
+        ctx.application.user_data[uid].setdefault("blocks_sent", set()).add(block_key)
+
+    if block_key == "b1":
+        await _exec_block1(uid, bot, jq)
+        await schedule_next_unseen(uid, "b1", ctx)
+    elif block_key == "b2":
+        await _exec_block2(uid, bot, jq)
+        await schedule_next_unseen(uid, "b2", ctx)
+    elif block_key == "b3":
+        await _exec_block3(uid, bot, jq)
+        await schedule_next_unseen(uid, "b3", ctx)
+    elif block_key == "final":
+        await _exec_final(uid, bot, jq)
 
 
 def main():
