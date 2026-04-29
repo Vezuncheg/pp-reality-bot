@@ -1099,6 +1099,23 @@ def main():
         ])
         logger.info("Команды меню установлены ✅")
 
+        # Запускаем payment server в том же event loop
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from aiohttp import web as _web
+            from payments import create_app as _create_app, init_db as _init_db
+            _init_db()
+            _payment_app = _create_app()
+            _port = int(os.getenv("PORT", "8080"))
+            runner = _web.AppRunner(_payment_app)
+            await runner.setup()
+            site = _web.TCPSite(runner, "0.0.0.0", _port)
+            await site.start()
+            logger.info(f"Payment server запущен на порту {_port} ✅")
+        except Exception as e:
+            logger.error(f"Payment server ошибка: {e}")
+
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     conv = ConversationHandler(
@@ -1135,26 +1152,6 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
 
     logger.info("Программа Преображения bot started ✅")
-
-    # Запускаем payment webhook сервер в фоне
-    import threading, sys, os
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-    def start_payment_server():
-        try:
-            import asyncio as _aio
-            from aiohttp import web as _web
-            from payments import create_app as _create_app, init_db as _init_db
-            _init_db()
-            _app = _create_app()
-            port = int(os.getenv("PORT", "8080"))
-            logger.info(f"Payment server запускается на порту {port}")
-            _web.run_app(_app, port=port, print=lambda x: None)
-        except Exception as e:
-            logger.error(f"Payment server ошибка: {e}")
-
-    t = threading.Thread(target=start_payment_server, daemon=True)
-    t.start()
 
     app.run_polling(drop_pending_updates=True)
 

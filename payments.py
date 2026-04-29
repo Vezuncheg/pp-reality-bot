@@ -11,6 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from aiohttp import web
+from aiohttp.web_middlewares import middleware
 import httpx
 
 # ── Переменные окружения ──
@@ -297,11 +298,28 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok")
 
 
+@middleware
+async def cors_middleware(request, handler):
+    if request.method == "OPTIONS":
+        return web.Response(headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        })
+    response = await handler(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+
 def create_app():
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_post("/create-payment", handle_create_payment)
     app.router.add_post("/webhook", handle_webhook)
     app.router.add_get("/health", handle_health)
+    app.router.add_options("/create-payment", lambda r: web.Response())
+    app.router.add_options("/webhook", lambda r: web.Response())
     return app
 
 
