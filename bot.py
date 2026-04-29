@@ -1135,6 +1135,27 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
 
     logger.info("Программа Преображения bot started ✅")
+
+    # Запускаем payment webhook сервер в фоне
+    import threading, sys, os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+    def start_payment_server():
+        try:
+            import asyncio as _aio
+            from aiohttp import web as _web
+            from payments import create_app as _create_app, init_db as _init_db
+            _init_db()
+            _app = _create_app()
+            port = int(os.getenv("PORT", "8080"))
+            logger.info(f"Payment server запускается на порту {port}")
+            _web.run_app(_app, port=port, print=lambda x: None)
+        except Exception as e:
+            logger.error(f"Payment server ошибка: {e}")
+
+    t = threading.Thread(target=start_payment_server, daemon=True)
+    t.start()
+
     app.run_polling(drop_pending_updates=True)
 
 
