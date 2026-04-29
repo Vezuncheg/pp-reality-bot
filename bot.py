@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+from datetime import datetime
 import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
@@ -1056,6 +1057,30 @@ async def _dispatch_next_block(uid, block_key, ctx):
         await _exec_final(uid, bot, jq)
 
 
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /export — выгрузка БД в Excel (только для админа)"""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    try:
+        from export import export_to_excel
+        import io
+        data = export_to_excel()
+        fname = f"payments_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        await update.message.reply_document(
+            document=io.BytesIO(data),
+            filename=fname,
+            caption=f"📊 Выгрузка платежей — {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
+
 def main():
     if not TOKEN:
         logger.error("BOT_TOKEN не установлен!")
@@ -1070,6 +1095,7 @@ def main():
             BotCommand("product",   "💪 Что вы получите в реалити"),
             BotCommand("fitsfor",   "✅ Кому подходит реалити"),
             BotCommand("menu",      "📋 Главное меню"),
+            BotCommand("export",    "📥 Выгрузить базу данных"),
         ])
         logger.info("Команды меню установлены ✅")
 
@@ -1098,6 +1124,7 @@ def main():
     app.add_handler(CommandHandler("product",   cmd_product))
     app.add_handler(CommandHandler("fitsfor",   cmd_fitsfor))
     app.add_handler(CommandHandler("myresult",  cmd_myresult))
+    app.add_handler(CommandHandler("export",    cmd_export))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
     app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
