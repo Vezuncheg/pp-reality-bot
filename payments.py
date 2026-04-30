@@ -182,18 +182,7 @@ async def handle_successful_payment(payment_data: dict):
 
     logger.info(f"Успешная оплата: tg_id={tg_id} plan={plan_key} amount={amount}")
 
-    # Генерируем invite-ссылки
-    ts = datetime.now().strftime("%d.%m %H:%M")
-    channel_link = await create_invite_link(CHANNEL_ID, f"{name} {ts}")
-
-    club_link  = None
-    club_until = None
-
-    if plan["club"]:
-        club_link  = await create_invite_link(CLUB_CHAT_ID, f"Клуб {name} {ts}")
-        club_until = (datetime.now() + timedelta(days=30)).isoformat()
-
-    # Сохраняем в БД
+    # Сохраняем в БД сразу — чтобы данные не терялись даже при ошибке ссылок
     save_payment({
         "payment_id":   payment_id,
         "tg_id":        tg_id,
@@ -204,10 +193,45 @@ async def handle_successful_payment(payment_data: dict):
         "plan_name":    plan["name"],
         "amount":       amount,
         "paid_at":      paid_at,
-        "club_until":   club_until,
-        "channel_link": channel_link,
-        "club_link":    club_link,
+        "club_until":   None,
+        "channel_link": None,
+        "club_link":    None,
     })
+
+    # Генерируем invite-ссылки
+    ts = datetime.now().strftime("%d.%m %H:%M")
+    try:
+        channel_link = await create_invite_link(CHANNEL_ID, f"{name} {ts}")
+    except Exception as e:
+        logger.error(f"Ошибка ссылки канала: {e}")
+        await send_message(ADMIN_TG_ID,
+            f"⚠️ Ошибка генерации ссылки канала для {name} (tg_id={tg_id})\nПроверьте права бота в канале!")
+        channel_link = None
+
+    club_link  = None
+    club_until = None
+
+    if plan["club"]:
+        try:
+            club_link  = await create_invite_link(CLUB_CHAT_ID, f"Клуб {name} {ts}")
+            club_until = (datetime.now() + timedelta(days=30)).isoformat()
+        except Exception as e:
+            logger.error(f"Ошибка ссылки клуба: {e}")
+            await send_message(ADMIN_TG_ID,
+                f"⚠️ Ошибка генерации ссылки клуба для {name} (tg_id={tg_id})\nПроверьте права бота в чате!")
+
+    # Обновляем БД со ссылками
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "UPDATE payments SET channel_link=?, club_link=?, club_until=? WHERE payment_id=?",
+            (channel_link, club_link, club_until, payment_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка обновления БД: {e}")
 
     # Отправляем ссылки пользователю
     if plan["club"]:
