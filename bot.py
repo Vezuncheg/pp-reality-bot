@@ -207,6 +207,9 @@ async def schedule_dojim(uid, context):
 
     # ── Через 1 час: таймер истёк, предлагаем 3 раздела ──
     async def d1h(ctx):
+        if is_paid(uid):
+            logger.info(f"uid={uid} уже оплатил — d1h пропущен")
+            return
         await ctx.bot.send_message(
             uid,
             "Прежде чем примите решение, хочу рассказать Вам больше о том, что стоит за Реалити #ПП.\n\n"
@@ -221,6 +224,9 @@ async def schedule_dojim(uid, context):
 
     # ── Блок 1: Об Иване (день 1) ──
     async def block1(ctx):
+        if is_paid(uid):
+            logger.info(f"uid={uid} уже оплатил — блок 1 пропущен")
+            return
 
         # Вступление от команды
         await ctx.bot.send_message(uid,
@@ -351,6 +357,9 @@ async def schedule_dojim(uid, context):
 
     # ── Блок 2: Подробно о продукте (день 2) ──
     async def block2(ctx):
+        if is_paid(uid):
+            logger.info(f"uid={uid} уже оплатил — блок 2 пропущен")
+            return
 
         # Вступление
         await ctx.bot.send_message(uid,
@@ -396,6 +405,9 @@ async def schedule_dojim(uid, context):
 
     # ── Блок 3: Кому подойдёт, а кому нет (день 3) ──
     async def block3(ctx):
+        if is_paid(uid):
+            logger.info(f"uid={uid} уже оплатил — блок 3 пропущен")
+            return
 
         # Сообщение 1 — вступление + кому НЕ подойдёт + кому подойдёт (всё вместе)
         await ctx.bot.send_message(uid,
@@ -479,6 +491,9 @@ async def schedule_dojim(uid, context):
 
     # ── Финальный дожим (день 5) ──
     async def final(ctx):
+        if is_paid(uid):
+            logger.info(f"uid={uid} уже оплатил — финал пропущен")
+            return
         await ctx.bot.send_message(
             uid,
             "*Реалити уже скоро!*",
@@ -1035,6 +1050,9 @@ async def schedule_next_unseen(uid, current_block, context_or_jq):
 
 async def _dispatch_next_block(uid, block_key, ctx):
     """Запускает нужный блок и помечает как просмотренный."""
+    if is_paid(uid):
+        logger.info(f"uid={uid} уже оплатил — {block_key} пропущен")
+        return
     bot = ctx.bot
     jq = ctx.application.job_queue
 
@@ -1078,6 +1096,23 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {e}")
+
+
+
+def is_paid(tg_id: int) -> bool:
+    """Проверяет оплатил ли пользователь (есть ли запись в БД)."""
+    try:
+        import sqlite3
+        db_path = "/app/payments.db"
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT id FROM payments WHERE tg_id=? AND status='active' LIMIT 1",
+            (tg_id,)
+        ).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return False
 
 
 
