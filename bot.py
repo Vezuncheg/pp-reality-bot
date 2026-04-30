@@ -528,6 +528,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     arch = ARCHETYPES.get(arch_key)
     context.user_data["arch_key"] = arch_key
 
+    # Логируем пользователя и событие
+    uid = update.effective_user.id
+    try:
+        from db import user_upsert as _upsert, log_event as _log
+        _upsert(uid,
+                username=update.effective_user.username,
+                full_name=update.effective_user.full_name)
+        _log(uid, "start", arch_key or "direct")
+        if arch_key:
+            from db import user_update_profile as _profile
+            _profile(uid, archetype=arch_key)
+    except Exception as e:
+        logger.error(f"analytics start error: {e}")
+
     if not arch:
         await update.message.reply_text(
             "Привет! 👋\nПройдите тест и получи разбор:\n\n"
@@ -680,6 +694,25 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔥 Получить специальную цену →",
                 url=f"{PAY_PROMO}&tg_id={uid}")],
         ]))
+
+    # Логируем завершение анкеты
+    try:
+        from db import log_event as _log, user_update_profile as _profile
+        _log(uid, "quiz_completed", f"goal={goal}")
+        _profile(uid, goal=goal,
+                 weight=context.user_data.get("weight"),
+                 height=context.user_data.get("height"),
+                 age=context.user_data.get("age"),
+                 gender=context.user_data.get("gender"))
+    except Exception as e:
+        logger.error(f"analytics quiz error: {e}")
+
+    # Логируем клик на кнопку оплаты
+    try:
+        from db import log_event as _log
+        _log(uid, "pay_clicked", "promo_offer")
+    except Exception as e:
+        logger.error(f"analytics pay click error: {e}")
 
     await schedule_dojim(uid, context)
     return ConversationHandler.END
@@ -1214,6 +1247,113 @@ async def reply_from_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /stats — сводная статистика (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    try:
+        from db import get_stats as _get_stats
+        s = _get_stats()
+        if not s:
+            await update.message.reply_text("Ошибка получения статистики.")
+            return
+
+        # Конверсия
+        conv = round(s["paid_total"] / s["total_users"] * 100, 1) if s["total_users"] else 0
+
+        # Топ архетипы
+        arch_names = {
+            "emotional_eater": "Эмоц. едок",
+            "social_hostage": "Соц. заложник",
+            "metabolic_skeptic": "Метаб. скептик",
+            "starter_stopper": "Стартер-стопер",
+        }
+        arch_lines = ""
+        for arch, cnt in s.get("archetypes", []):
+            arch_lines += f"  {arch_names.get(arch, arch)}: {cnt}\n"
+
+        # Топ события
+        event_lines = ""
+        for event, cnt in s.get("events", [])[:8]:
+            event_lines += f"  {event}: {cnt}\n"
+
+        text = (
+            f"📈 *Статистика бота*\n\n"
+            f"👥 Всего пользователей: *{s['total_users']}*\n"
+            f"🆕 Новых сегодня: *{s['new_today']}*\n"
+            f"📅 Новых за неделю: *{s['new_week']}*\n\n"
+            f"💰 Оплатили: *{s['paid_total']}*\n"
+            f"💵 Выручка: *{s['revenue']:,} ₽*\n"
+            f"📊 Конверсия: *{conv}%*\n\n"
+            f"⏳ В воронке сейчас: *{s['in_funnel']}*\n\n"
+            f"🎭 *Архетипы:*\n{arch_lines}\n"
+            f"🔢 *События:*\n{event_lines}"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /broadcast <текст> — рассылка всем пользователям (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        await update.message.reply_text(
+            "Использование: /broadcast Текст сообщения\n\n"
+            "Поддерживается Markdown разметка."
+        )
+        return
+
+    try:
+        from db import get_broadcast_users as _get_users, log_event as _log
+        users = _get_users()
+        if not users:
+            await update.message.reply_text("Нет пользователей для рассылки.")
+            return
+
+        await update.message.reply_text(
+            f"📢 Начинаю рассылку для *{len(users)}* пользователей...",
+            parse_mode="Markdown"
+        )
+
+        sent = 0
+        failed = 0
+        for tg_id in users:
+            try:
+                await context.bot.send_message(
+                    chat_id=tg_id,
+                    text=text,
+                    parse_mode="Markdown"
+                )
+                sent += 1
+                await asyncio.sleep(0.05)  # защита от flood limit
+            except Exception:
+                failed += 1
+
+        # Логируем рассылку
+        _log(uid, "broadcast_sent", f"sent={sent} failed={failed}")
+
+        await update.message.reply_text(
+            f"✅ Рассылка завершена!\n\n"
+            f"Отправлено: *{sent}*\n"
+            f"Ошибок: *{failed}*",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
 async def restore_funnels(application):
     """Восстанавливает запланированные задачи после деплоя из БД."""
     from datetime import timedelta
@@ -1282,6 +1422,13 @@ async def _dispatch_block_by_key(uid: int, block_key: str, ctx):
 
     try:
         from db import funnel_mark_block as _mark
+        # Логируем просмотр блока
+        try:
+            from db import log_event as _log
+            _log(uid, f"block_viewed", block_key)
+        except Exception as e:
+            logger.error(f"analytics block log error: {e}")
+
         if block_key == "d1h":
             await ctx.bot.send_message(
                 uid,
@@ -1332,6 +1479,8 @@ def main():
             BotCommand("fitsfor",   "✅ Кому подходит реалити"),
             BotCommand("menu",      "📋 Главное меню"),
             BotCommand("export",    "📥 Выгрузить базу данных"),
+            BotCommand("stats",     "📈 Статистика (админ)"),
+            BotCommand("broadcast", "📢 Рассылка (админ)"),
         ])
         logger.info("Команды меню установлены ✅")
 
@@ -1382,6 +1531,8 @@ def main():
     app.add_handler(CommandHandler("fitsfor",   cmd_fitsfor))
     app.add_handler(CommandHandler("myresult",  cmd_myresult))
     app.add_handler(CommandHandler("export",    cmd_export))
+    app.add_handler(CommandHandler("stats",     cmd_stats))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
     app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
