@@ -65,31 +65,32 @@ ARCHETYPES = {
 def calc(weight, height, goal):
     bmi = round(weight / ((height / 100) ** 2), 1)
     if goal == "fat":
-        lo, hi = (8, 12) if bmi > 30 else (6, 9) if bmi > 25 else (4, 7)
+        # Реалистичные показатели за 28 дней
+        lo, hi = (4, 6) if bmi > 30 else (3, 5) if bmi > 25 else (2, 4)
         wlo, whi = round(weight - hi), round(weight - lo)
         bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
         return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
                     ch=f"−{lo}–{hi} кг жира",
-                    muscle="+1–2 кг мышц при правильном балансе БЖУ",
+                    muscle="+0.5–1 кг мышц при правильном балансе БЖУ",
                     b2=bmi2,
-                    waist=f"минус {lo+1}–{hi-1} см в талии",
+                    waist=f"минус {lo}–{hi} см в талии",
                     en="заметно вырастет к 3-й неделе")
     elif goal == "muscle":
         return dict(cw=weight, cb=bmi,
-                    wr=f"{round(weight+3)}–{round(weight+6)} кг",
-                    ch="+3–6 кг мышечной массы",
-                    muscle="жировая прослойка снизится на 1–2%",
-                    b2=round(bmi+0.8, 1),
+                    wr=f"{round(weight+1)}–{round(weight+2)} кг",
+                    ch="+1–2 кг мышечной массы",
+                    muscle="жировая прослойка снизится на 0.5–1%",
+                    b2=round(bmi+0.3, 1),
                     waist="больше мышц, рельеф",
                     en="вырастет к 2-й неделе")
     else:
-        wlo, whi = round(weight - 5), round(weight - 3)
+        wlo, whi = round(weight - 3), round(weight - 2)
         bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
         return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
-                    ch="−3–5 кг + рельеф и тонус",
-                    muscle="+1–3 кг мышечного тонуса",
+                    ch="−2–3 кг + рельеф и тонус",
+                    muscle="+0.5–1.5 кг мышечного тонуса",
                     b2=bmi2,
-                    waist="минус 3–5 см, заметный рельеф",
+                    waist="минус 2–4 см, заметный рельеф",
                     en="вырастет уже к концу 1-й недели")
 
 
@@ -504,8 +505,19 @@ async def schedule_dojim(uid, context):
             ])
         )
 
-    # ── ТЕСТОВЫЕ ТАЙМИНГИ (заменить на боевые после проверки) ──
-    # Блоки запускают друг друга цепочкой от последнего сообщения
+    # ── ТАЙМИНГИ ──
+    from datetime import timedelta
+    now = datetime.now()
+    d1h_at = now + timedelta(seconds=3600)
+    b1_at  = now + timedelta(seconds=86400)
+
+    # Сохраняем воронку в БД — восстановится после деплоя
+    try:
+        from db import funnel_start as _funnel_start
+        _funnel_start(uid, d1h_at, b1_at)
+    except Exception as e:
+        logger.error(f"funnel_start DB error: {e}")
+
     jq.run_once(d1h,    3600,  name=f"d1h_{uid}")   # 1 час после оффера
     jq.run_once(block1, 86400, name=f"b1_{uid}")    # 1 сутки после оффера
     # block2, block3, final запускаются цепочкой внутри каждого блока
@@ -1201,6 +1213,110 @@ async def reply_from_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 
+
+async def restore_funnels(application):
+    """Восстанавливает запланированные задачи после деплоя из БД."""
+    from datetime import timedelta
+    try:
+        from db import funnel_get_active as _get_active
+        rows = _get_active()
+        if not rows:
+            logger.info("Нет активных воронок для восстановления")
+            return
+
+        now = datetime.now()
+        jq = application.job_queue
+        restored = 0
+
+        for row in rows:
+            tg_id, blocks_sent_str, d1h_at, b1_at, b2_at, b3_at, final_at = row
+            sent = set(blocks_sent_str.split(',')) if blocks_sent_str else set()
+
+            # Для каждого незапланированного блока — проверяем время
+            schedule_map = {
+                "d1h":   d1h_at,
+                "b1":    b1_at,
+                "b2":    b2_at,
+                "b3":    b3_at,
+                "final": final_at,
+            }
+
+            for block_key, send_at in schedule_map.items():
+                if send_at is None:
+                    continue
+                if block_key in sent:
+                    continue  # уже отправлен
+
+                # Считаем задержку
+                delay = max(0, (send_at - now).total_seconds())
+
+                # Планируем задачу
+                _uid = tg_id
+                _key = block_key
+
+                async def _run(ctx, uid=_uid, key=_key):
+                    await _dispatch_block_by_key(uid, key, ctx)
+
+                job_name = f"restore_{block_key}_{tg_id}"
+                # Не дублируем если уже запланировано
+                existing = jq.get_jobs_by_name(job_name)
+                if not existing:
+                    jq.run_once(_run, when=delay, name=job_name)
+                    restored += 1
+                    logger.info(f"Восстановлен блок {block_key} для uid={tg_id} через {int(delay)}с")
+
+        logger.info(f"Восстановлено задач: {restored} для {len(rows)} пользователей ✅")
+
+    except Exception as e:
+        logger.error(f"restore_funnels error: {e}")
+
+
+async def _dispatch_block_by_key(uid: int, block_key: str, ctx):
+    """Универсальный запуск блока по ключу (для восстановления)."""
+    if is_paid(uid):
+        logger.info(f"uid={uid} уже оплатил — {block_key} пропущен при восстановлении")
+        return
+
+    bot = ctx.bot
+    jq = ctx.application.job_queue
+
+    try:
+        from db import funnel_mark_block as _mark
+        if block_key == "d1h":
+            await ctx.bot.send_message(
+                uid,
+                "Прежде чем примите решение, хочу рассказать Вам больше о том, что стоит за Реалити #ПП.\n\n"
+                "Выберите, с чего начать 👇",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
+                    [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
+                    [InlineKeyboardButton("✅ Кому подходит реалити, а кому нет?", callback_data="start_b3")],
+                    [InlineKeyboardButton("Записаться →", url=f"{PAY_URL}?tg_id={uid}")],
+                ])
+            )
+            _mark(uid, "d1h")
+        elif block_key == "b1":
+            await _exec_block1(uid, bot, jq)
+            _mark(uid, "b1", "b2", datetime.now() + __import__('datetime').timedelta(seconds=86400))
+        elif block_key == "b2":
+            await _exec_block2(uid, bot, jq)
+            _mark(uid, "b2", "b3", datetime.now() + __import__('datetime').timedelta(seconds=86400))
+        elif block_key == "b3":
+            await _exec_block3(uid, bot, jq)
+            _mark(uid, "b3", "final", datetime.now() + __import__('datetime').timedelta(seconds=86400))
+        elif block_key == "final":
+            if not is_paid(uid):
+                await ctx.bot.send_message(
+                    uid,
+                    "*Реалити уже скоро!*",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]])
+                )
+            _mark(uid, "final")
+    except Exception as e:
+        logger.error(f"_dispatch_block_by_key error uid={uid} block={block_key}: {e}")
+
+
 def main():
     if not TOKEN:
         logger.error("BOT_TOKEN не установлен!")
@@ -1236,6 +1352,9 @@ def main():
             logger.info(f"Payment server запущен на порту {_port} ✅")
         except Exception as e:
             logger.error(f"Payment server ошибка: {e}")
+
+        # Восстанавливаем воронки после деплоя
+        await restore_funnels(application)
 
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
