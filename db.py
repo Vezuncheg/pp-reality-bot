@@ -1,5 +1,6 @@
 """
 db.py — единый модуль работы с БД (PostgreSQL через Supabase)
+Используй Transaction Pooler URL (порт 6543) в DATABASE_URL для Railway.
 """
 import os
 import logging
@@ -8,9 +9,12 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+
 def get_conn():
     import psycopg2
-    return psycopg2.connect(DATABASE_URL)
+    # connect_timeout — защита от зависания при недоступной БД
+    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
+
 
 def init_db():
     conn = get_conn()
@@ -36,7 +40,8 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    logger.info("БД инициализирована (PostgreSQL)")
+    logger.info("БД инициализирована (PostgreSQL) ✅")
+
 
 def save_payment(data: dict):
     conn = get_conn()
@@ -48,8 +53,8 @@ def save_payment(data: dict):
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (payment_id) DO UPDATE SET
             channel_link = EXCLUDED.channel_link,
-            club_link = EXCLUDED.club_link,
-            club_until = EXCLUDED.club_until
+            club_link    = EXCLUDED.club_link,
+            club_until   = EXCLUDED.club_until
     """, (
         data["payment_id"], data["tg_id"], data.get("tg_username"),
         data.get("name"), data.get("email"),
@@ -62,6 +67,7 @@ def save_payment(data: dict):
     cur.close()
     conn.close()
 
+
 def update_payment_links(payment_id: str, channel_link: str, club_link: str, club_until: str):
     conn = get_conn()
     cur = conn.cursor()
@@ -72,6 +78,7 @@ def update_payment_links(payment_id: str, channel_link: str, club_link: str, clu
     conn.commit()
     cur.close()
     conn.close()
+
 
 def is_paid(tg_id: int) -> bool:
     try:
@@ -88,6 +95,7 @@ def is_paid(tg_id: int) -> bool:
     except Exception as e:
         logger.error(f"is_paid error: {e}")
         return False
+
 
 def get_all_payments():
     conn = get_conn()
