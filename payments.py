@@ -105,6 +105,13 @@ async def handle_successful_payment(payment_data: dict):
 
     logger.info(f"Успешная оплата: tg_id={tg_id} plan={plan_key} amount={amount}")
 
+    # Отмечаем воронку как оплаченную — останавливает дальнейшие рассылки
+    try:
+        from db import funnel_mark_paid as _mark_paid
+        _mark_paid(tg_id)
+    except Exception as e:
+        logger.error(f"funnel_mark_paid error: {e}")
+
     # Сохраняем сразу — данные не потеряются
     save_payment({
         "payment_id": payment_id, "tg_id": tg_id,
