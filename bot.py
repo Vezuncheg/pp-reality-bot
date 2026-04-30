@@ -1171,11 +1171,14 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     # Не пересылаем если пользователь проходит анкету
-    # Анкета активна пока в user_data есть arch_key но нет forecast
-    arch_key = context.user_data.get("arch_key")
-    forecast = context.user_data.get("forecast")
-    if arch_key and not forecast:
-        return  # пользователь в середине анкеты
+    # Проверяем по состоянию ConversationHandler в application.chat_data
+    try:
+        conv_key = (update.effective_chat.id, update.effective_user.id)
+        conversations = context.application.handlers[0][0].conversations
+        if conv_key in conversations:
+            return  # пользователь в активном диалоге
+    except Exception:
+        pass
 
     name = msg.from_user.full_name or ""
     username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
