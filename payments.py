@@ -21,9 +21,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 PLANS = {
-    "base":     {"name": "Стартовый пинок",    "amount": 100, "club": False},
-    "extended": {"name": "Полное погружение",   "amount": 100, "club": True},
-    "personal": {"name": "Иван лично со мной", "amount": 100, "club": True},
+    "base":     {"name": "Стартовый пинок",    "amount": 100,   "club": False},  # тест 100р, боевой: 5300
+    "extended": {"name": "Полное погружение",   "amount": 100,   "club": True},   # тест 100р, боевой: 7900
+    "personal": {"name": "Иван лично со мной", "amount": 100,   "club": True},   # тест 100р, боевой: 21200
 }
 
 async def tg_api(method: str, payload: dict) -> dict:
@@ -184,7 +184,8 @@ async def cors_middleware(app, handler):
             return web.Response(headers={
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Max-Age": "86400",
             })
         response = await handler(request)
         response.headers["Access-Control-Allow-Origin"] = "*"

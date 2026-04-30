@@ -623,7 +623,7 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["forecast"] = f
 
     await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
-    await asyncio.sleep(60)  # пауза 1 минута перед следующим сообщением
+    await asyncio.sleep(30)  # пауза 30 секунд перед следующим сообщением
     await update.callback_query.message.reply_text(arch["tools"])
     await asyncio.sleep(1.5)
 
