@@ -20,7 +20,7 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
-    # Таблица платежей
+    # Платежи
     cur.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id              SERIAL PRIMARY KEY,
@@ -40,7 +40,7 @@ def init_db():
         )
     """)
 
-    # Таблица воронки пользователей — для восстановления после деплоя
+    # Воронка пользователей
     cur.execute("""
         CREATE TABLE IF NOT EXISTS user_funnels (
             tg_id           BIGINT PRIMARY KEY,
@@ -55,6 +55,37 @@ def init_db():
             updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
         )
     """)
+
+    # Все пользователи бота
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            tg_id           BIGINT PRIMARY KEY,
+            username        TEXT,
+            full_name       TEXT,
+            first_seen      TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_seen       TIMESTAMP NOT NULL DEFAULT NOW(),
+            start_count     INTEGER NOT NULL DEFAULT 1,
+            archetype       TEXT,
+            gender          TEXT,
+            age             INTEGER,
+            weight          NUMERIC,
+            height          NUMERIC,
+            goal            TEXT
+        )
+    """)
+
+    # События пользователей
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_events (
+            id              SERIAL PRIMARY KEY,
+            tg_id           BIGINT NOT NULL,
+            event           TEXT NOT NULL,
+            data            TEXT,
+            created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_events_tg_id ON user_events(tg_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_events_event ON user_events(event)")
 
     conn.commit()
     cur.close()
@@ -135,7 +166,6 @@ def get_all_payments():
 # ── USER FUNNELS ───────────────────────────────────────────
 
 def funnel_start(tg_id: int, d1h_at, b1_at):
-    """Создаёт запись воронки при старте пользователя."""
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -161,11 +191,9 @@ def funnel_start(tg_id: int, d1h_at, b1_at):
 
 
 def funnel_mark_block(tg_id: int, block: str, next_block: str = None, next_at=None):
-    """Помечает блок как отправленный и планирует следующий."""
     try:
         conn = get_conn()
         cur = conn.cursor()
-        # Добавляем блок в список отправленных
         cur.execute("""
             UPDATE user_funnels
             SET blocks_sent = CASE
@@ -175,14 +203,11 @@ def funnel_mark_block(tg_id: int, block: str, next_block: str = None, next_at=No
             updated_at = NOW()
             WHERE tg_id = %s
         """, (block, block, tg_id))
-
-        # Обновляем время следующего блока
         if next_block and next_at:
             col_map = {"d1h": "d1h_at", "b1": "b1_at", "b2": "b2_at", "b3": "b3_at", "final": "final_at"}
             col = col_map.get(next_block)
             if col:
                 cur.execute(f"UPDATE user_funnels SET {col} = %s WHERE tg_id = %s", (next_at, tg_id))
-
         conn.commit()
         cur.close()
         conn.close()
@@ -191,7 +216,6 @@ def funnel_mark_block(tg_id: int, block: str, next_block: str = None, next_at=No
 
 
 def funnel_mark_paid(tg_id: int):
-    """Отмечает пользователя как оплатившего — останавливает воронку."""
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -207,7 +231,6 @@ def funnel_mark_paid(tg_id: int):
 
 
 def funnel_get_active():
-    """Возвращает все активные воронки для восстановления после деплоя."""
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -225,3 +248,172 @@ def funnel_get_active():
     except Exception as e:
         logger.error(f"funnel_get_active error: {e}")
         return []
+
+
+# ── USERS ─────────────────────────────────────────────────
+
+def user_upsert(tg_id: int, username: str = None, full_name: str = None):
+    """Создаёт или обновляет пользователя. Считает запуски."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (tg_id, username, full_name, first_seen, last_seen, start_count)
+            VALUES (%s, %s, %s, NOW(), NOW(), 1)
+            ON CONFLICT (tg_id) DO UPDATE SET
+                username    = COALESCE(EXCLUDED.username, users.username),
+                full_name   = COALESCE(EXCLUDED.full_name, users.full_name),
+                last_seen   = NOW(),
+                start_count = users.start_count + 1
+        """, (tg_id, username, full_name))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"user_upsert error: {e}")
+
+
+def user_update_profile(tg_id: int, archetype: str = None, gender: str = None,
+                        age: int = None, weight: float = None,
+                        height: float = None, goal: str = None):
+    """Сохраняет данные анкеты пользователя."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        fields = []
+        values = []
+        for col, val in [("archetype", archetype), ("gender", gender), ("age", age),
+                         ("weight", weight), ("height", height), ("goal", goal)]:
+            if val is not None:
+                fields.append(f"{col} = %s")
+                values.append(val)
+        if fields:
+            values.append(tg_id)
+            cur.execute(f"UPDATE users SET {', '.join(fields)} WHERE tg_id = %s", values)
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"user_update_profile error: {e}")
+
+
+def get_all_users():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT u.tg_id, u.username, u.full_name, u.first_seen, u.last_seen,
+               u.start_count, u.archetype, u.gender, u.age, u.weight, u.height, u.goal,
+               COALESCE(p.plan_name, '—') as plan,
+               COALESCE(p.amount::text, '—') as amount,
+               COALESCE(p.paid_at, '—') as paid_at
+        FROM users u
+        LEFT JOIN payments p ON p.tg_id = u.tg_id AND p.status = 'active'
+        ORDER BY u.first_seen DESC
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_broadcast_users():
+    """Возвращает всех пользователей для рассылки."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT tg_id FROM users ORDER BY first_seen ASC")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error(f"get_broadcast_users error: {e}")
+        return []
+
+
+# ── USER EVENTS ────────────────────────────────────────────
+
+def log_event(tg_id: int, event: str, data: str = None):
+    """Записывает событие пользователя."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO user_events (tg_id, event, data) VALUES (%s, %s, %s)",
+            (tg_id, event, data)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"log_event error: {e}")
+
+
+def get_stats():
+    """Возвращает сводную статистику."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) FROM users")
+        total_users = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM users WHERE first_seen > NOW() - INTERVAL '24 hours'")
+        new_today = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM users WHERE first_seen > NOW() - INTERVAL '7 days'")
+        new_week = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(DISTINCT tg_id) FROM payments WHERE status='active'")
+        paid_total = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(DISTINCT tg_id) FROM user_funnels WHERE is_paid = FALSE")
+        in_funnel = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT event, COUNT(*) FROM user_events
+            GROUP BY event ORDER BY COUNT(*) DESC
+        """)
+        events = cur.fetchall()
+
+        cur.execute("""
+            SELECT archetype, COUNT(*) FROM users
+            WHERE archetype IS NOT NULL
+            GROUP BY archetype ORDER BY COUNT(*) DESC
+        """)
+        archetypes = cur.fetchall()
+
+        cur.execute("SELECT SUM(amount) FROM payments WHERE status='active'")
+        revenue = cur.fetchone()[0] or 0
+
+        cur.close()
+        conn.close()
+        return {
+            "total_users": total_users,
+            "new_today": new_today,
+            "new_week": new_week,
+            "paid_total": paid_total,
+            "in_funnel": in_funnel,
+            "events": events,
+            "archetypes": archetypes,
+            "revenue": revenue,
+        }
+    except Exception as e:
+        logger.error(f"get_stats error: {e}")
+        return {}
+
+
+def get_all_events():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT e.tg_id, u.full_name, u.username, e.event, e.data, e.created_at
+        FROM user_events e
+        LEFT JOIN users u ON u.tg_id = e.tg_id
+        ORDER BY e.created_at DESC
+        LIMIT 10000
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
