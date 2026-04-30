@@ -21,9 +21,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 PLANS = {
-    "base":     {"name": "Стартовый пинок",    "amount": 100,   "club": False},  # тест 100р, боевой: 5300
-    "extended": {"name": "Полное погружение",   "amount": 100,   "club": True},   # тест 100р, боевой: 7900
-    "personal": {"name": "Иван лично со мной", "amount": 100,   "club": True},   # тест 100р, боевой: 21200
+    "base":     {"name": "Стартовый пинок",    "amount": 5300,  "amount_sale": 4600,  "club": False},
+    "extended": {"name": "Полное погружение",   "amount": 7900,  "amount_sale": 6900,  "club": True},
+    "personal": {"name": "Иван лично со мной", "amount": 21200, "amount_sale": 18500, "club": True},
 }
 
 async def tg_api(method: str, payload: dict) -> dict:
@@ -46,11 +46,12 @@ async def create_invite_link(chat_id: int, name: str) -> str:
         return result["result"]["invite_link"]
     raise Exception(f"Ошибка создания ссылки: {result}")
 
-async def create_payment(plan_key: str, tg_id: int, name: str, email: str, tg_username: str = "") -> dict:
+async def create_payment(plan_key: str, tg_id: int, name: str, email: str, tg_username: str = "", promo: bool = False) -> dict:
     plan = PLANS[plan_key]
+    amount = plan["amount_sale"] if promo and "amount_sale" in plan else plan["amount"]
     idempotence_key = f"{tg_id}-{plan_key}-{int(datetime.now().timestamp())}"
     payload = {
-        "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
         "capture": True,
         "confirmation": {
             "type": "redirect",
@@ -66,7 +67,7 @@ async def create_payment(plan_key: str, tg_id: int, name: str, email: str, tg_us
             "items": [{
                 "description": f"{plan['name']} — Реалити #ПП «Программа Преображения»",
                 "quantity": "1",
-                "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
+                "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
                 "vat_code": 1,
                 "payment_mode": "full_payment",
                 "payment_subject": "service"
@@ -87,7 +88,7 @@ async def create_payment(plan_key: str, tg_id: int, name: str, email: str, tg_us
         "payment_id": result["id"],
         "payment_url": result["confirmation"]["confirmation_url"],
         "plan_key": plan_key, "plan_name": plan["name"],
-        "amount": plan["amount"], "tg_id": tg_id,
+        "amount": amount, "tg_id": tg_id,
         "tg_username": tg_username, "name": name, "email": email,
     }
 
@@ -211,7 +212,8 @@ async def handle_create_payment(request: web.Request) -> web.Response:
             return web.json_response({"error": "Заполните все поля"}, status=400)
         if plan_key not in PLANS:
             return web.json_response({"error": "Неверный тариф"}, status=400)
-        result = await create_payment(plan_key, tg_id, name, email, tg_username)
+        promo = body.get("promo", False)
+        result = await create_payment(plan_key, tg_id, name, email, tg_username, promo=promo)
         return web.json_response({"payment_url": result["payment_url"]})
     except Exception as e:
         logger.error(f"create_payment error: {e}")
