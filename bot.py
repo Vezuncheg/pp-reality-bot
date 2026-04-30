@@ -13,9 +13,9 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
-QUIZ_URL  = "https://vezuncheg.github.io/fitstate"
-PAY_URL   = "https://vezuncheg.github.io/fitstate/pay.html"
-PAY_PROMO = "https://vezuncheg.github.io/fitstate/pay.html?promo=1"
+QUIZ_URL  = "https://pp-reality.ru"
+PAY_URL   = "https://pp-reality.ru/pay.html"
+PAY_PROMO = "https://pp-reality.ru/pay.html?promo=1"
 PAYMENT_URL = PAY_URL
 PHOTOS_URL = "https://raw.githubusercontent.com/Vezuncheg/fitstate/main/images"
 
@@ -754,7 +754,7 @@ async def cb_my_res(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"*Ваш тип:* {arch['emoji']} {arch['name']}\n*Прогноз:* {f['wr']} ({f['ch']}) за 28 дней",
             parse_mode="Markdown")
     else:
-        await update.callback_query.message.reply_text("Пройдите тест:\n👉 https://vezuncheg.github.io/fitstate")
+        await update.callback_query.message.reply_text("Пройдите тест:\n👉 https://pp-reality.ru")
 
 
 async def _exec_block1(uid, bot, jq):
