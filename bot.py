@@ -1100,17 +1100,10 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def is_paid(tg_id: int) -> bool:
-    """Проверяет оплатил ли пользователь (есть ли запись в БД)."""
+    """Проверяет оплатил ли пользователь через PostgreSQL."""
     try:
-        import sqlite3
-        db_path = "/app/payments.db"
-        conn = sqlite3.connect(db_path)
-        row = conn.execute(
-            "SELECT id FROM payments WHERE tg_id=? AND status='active' LIMIT 1",
-            (tg_id,)
-        ).fetchone()
-        conn.close()
-        return row is not None
+        from db import is_paid as _is_paid
+        return _is_paid(tg_id)
     except Exception:
         return False
 
@@ -1139,7 +1132,8 @@ def main():
             import sys, os
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from aiohttp import web as _web
-            from payments import create_app as _create_app, init_db as _init_db
+            from payments import create_app as _create_app
+            from db import init_db as _init_db
             _init_db()
             _payment_app = _create_app()
             _port = int(os.getenv("PORT", "8080"))
