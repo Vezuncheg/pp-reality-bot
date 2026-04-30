@@ -1128,14 +1128,14 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
     name = msg.from_user.full_name or ""
     username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
 
-    header = f"👤 *{name}* | {username} | ID: `{uid}`"
+    # Простой текст без parse_mode — спецсимволы в именах не вызывают ошибок
+    header = f"👤 {name} | {username} | ID: {uid}"
 
     try:
         # Отправляем заголовок
         header_msg = await context.bot.send_message(
             chat_id=SUPPORT_GROUP_ID,
             text=header,
-            parse_mode="Markdown"
         )
         # Пересылаем само сообщение
         fwd_msg = await msg.forward(chat_id=SUPPORT_GROUP_ID)
