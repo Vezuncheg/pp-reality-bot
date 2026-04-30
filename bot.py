@@ -548,6 +548,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👉 " + QUIZ_URL)
         return ConversationHandler.END
 
+    context.user_data["in_quiz"] = True  # начало анкеты — блокируем пересылку в поддержку
     await update.message.reply_text("Привет! 👋\n\nПолучил Ваши ответы. Даю разбор — 1 минута.")
     await asyncio.sleep(1.2)
     await update.message.reply_text(f"*{arch['emoji']} Ваш тип: {arch['name']}*\n\n{arch['problem']}", parse_mode="Markdown")
@@ -567,6 +568,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_later(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
+    context.user_data["in_quiz"] = False  # пользователь отказался — снимаем блок
     await update.callback_query.message.reply_text("Хорошо! Когда будете готовы — /start\nМеню: /menu")
     return ConversationHandler.END
 
@@ -714,6 +716,7 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"analytics pay click error: {e}")
 
+    context.user_data["in_quiz"] = False  # анкета завершена
     await schedule_dojim(uid, context)
     return ConversationHandler.END
 
@@ -1171,14 +1174,8 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     # Не пересылаем если пользователь проходит анкету
-    # Проверяем по состоянию ConversationHandler в application.chat_data
-    try:
-        conv_key = (update.effective_chat.id, update.effective_user.id)
-        conversations = context.application.handlers[0][0].conversations
-        if conv_key in conversations:
-            return  # пользователь в активном диалоге
-    except Exception:
-        pass
+    if context.user_data.get("in_quiz"):
+        return
 
     name = msg.from_user.full_name or ""
     username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
