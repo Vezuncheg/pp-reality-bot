@@ -1170,6 +1170,13 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if msg.text and msg.text.startswith('/'):
         return
 
+    # Не пересылаем если пользователь проходит анкету
+    # Анкета активна пока в user_data есть arch_key но нет forecast
+    arch_key = context.user_data.get("arch_key")
+    forecast = context.user_data.get("forecast")
+    if arch_key and not forecast:
+        return  # пользователь в середине анкеты
+
     name = msg.from_user.full_name or ""
     username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
 
@@ -1541,9 +1548,11 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_i_program, pattern="^i_program$"))
     app.add_handler(CallbackQueryHandler(cb_i_results, pattern="^i_results$"))
     app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
-    # Поддержка — пересылка сообщений (один раз, без дублирования)
+    # Поддержка — пересылка сообщений
+    # group=1 означает что ConversationHandler (group=0) обрабатывается первым
+    # и если он взял сообщение — forward_to_support не вызывается
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=1)
 
     logger.info("Программа Преображения bot started ✅")
 
