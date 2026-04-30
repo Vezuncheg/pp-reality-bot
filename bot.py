@@ -1109,6 +1109,155 @@ def is_paid(tg_id: int) -> bool:
 
 
 
+async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пересылает сообщение пользователя в группу поддержки."""
+    if not SUPPORT_GROUP_ID:
+        return
+    msg = update.message
+    if not msg:
+        return
+    uid = msg.from_user.id
+    # Не пересылаем сообщения из самой группы поддержки
+    if msg.chat.id == SUPPORT_GROUP_ID:
+        return
+    # Не пересылаем команды
+    if msg.text and msg.text.startswith('/'):
+        return
+
+    name = msg.from_user.full_name or ""
+    username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
+
+    header = f"👤 *{name}* | {username} | ID: `{uid}`"
+
+    try:
+        # Отправляем заголовок
+        header_msg = await context.bot.send_message(
+            chat_id=SUPPORT_GROUP_ID,
+            text=header,
+            parse_mode="Markdown"
+        )
+        # Пересылаем само сообщение
+        await msg.forward(chat_id=SUPPORT_GROUP_ID)
+        # Сохраняем связь: message_id в группе → tg_id пользователя
+        context.bot_data.setdefault("support_map", {})[header_msg.message_id + 1] = uid
+    except Exception as e:
+        logger.error(f"Ошибка пересылки в поддержку: {e}")
+
+
+async def reply_from_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет ответ из группы поддержки пользователю."""
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+    if msg.chat.id != SUPPORT_GROUP_ID:
+        return
+
+    # Ищем tg_id пользователя по reply
+    support_map = context.bot_data.get("support_map", {})
+    replied_id = msg.reply_to_message.message_id
+    tg_id = support_map.get(replied_id)
+
+    if not tg_id:
+        # Пробуем соседние message_id (пересланное сообщение идёт после заголовка)
+        for offset in [-1, 0, 1, -2, 2]:
+            tg_id = support_map.get(replied_id + offset)
+            if tg_id:
+                break
+
+    if not tg_id:
+        await msg.reply_text("⚠️ Не удалось найти пользователя. Убедитесь что отвечаете реплаем на пересланное сообщение.")
+        return
+
+    try:
+        if msg.text:
+            await context.bot.send_message(
+                chat_id=tg_id,
+                text="Ответ от команды:\n\n" + msg.text,
+                parse_mode="Markdown"
+            )
+        elif msg.photo:
+            await context.bot.send_photo(
+                chat_id=tg_id,
+                photo=msg.photo[-1].file_id,
+                caption=msg.caption or ""
+            )
+        elif msg.voice:
+            await context.bot.send_voice(chat_id=tg_id, voice=msg.voice.file_id)
+        elif msg.document:
+            await context.bot.send_document(chat_id=tg_id, document=msg.document.file_id)
+
+        await msg.reply_text(f"✅ Ответ отправлен пользователю ID: {tg_id}")
+        logger.info(f"Ответ отправлен пользователю {tg_id}")
+    except Exception as e:
+        await msg.reply_text(f"⚠️ Ошибка отправки: {e}")
+        logger.error(f"Ошибка ответа пользователю {tg_id}: {e}")
+
+
+
+async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пересылает сообщение пользователя в группу поддержки."""
+    if not SUPPORT_GROUP_ID:
+        return
+    msg = update.message
+    if not msg or msg.chat.id == SUPPORT_GROUP_ID:
+        return
+    if msg.text and msg.text.startswith("/"):
+        return
+
+    uid = msg.from_user.id
+    name = msg.from_user.full_name or ""
+    username = ("@" + msg.from_user.username) if msg.from_user.username else "без username"
+    header = f"👤 *{name}* | {username} | ID: `{uid}`"
+
+    try:
+        header_msg = await context.bot.send_message(
+            chat_id=SUPPORT_GROUP_ID,
+            text=header,
+            parse_mode="Markdown"
+        )
+        fwd = await msg.forward(chat_id=SUPPORT_GROUP_ID)
+        support_map = context.bot_data.setdefault("support_map", {})
+        support_map[fwd.message_id] = uid
+        support_map[header_msg.message_id] = uid
+    except Exception as e:
+        logger.error(f"Ошибка пересылки в поддержку: {e}")
+
+
+async def reply_from_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет ответ из группы поддержки пользователю."""
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+    if msg.chat.id != SUPPORT_GROUP_ID:
+        return
+
+    support_map = context.bot_data.get("support_map", {})
+    replied_id = msg.reply_to_message.message_id
+    tg_id = None
+    for offset in range(-3, 4):
+        tg_id = support_map.get(replied_id + offset)
+        if tg_id:
+            break
+
+    if not tg_id:
+        await msg.reply_text("Не удалось найти пользователя. Отвечайте реплаем на пересланное сообщение.")
+        return
+
+    try:
+        prefix = "Ответ от команды:\n\n"
+        if msg.text:
+            await context.bot.send_message(chat_id=tg_id, text=prefix + msg.text)
+        elif msg.photo:
+            await context.bot.send_photo(chat_id=tg_id, photo=msg.photo[-1].file_id, caption=msg.caption or "")
+        elif msg.voice:
+            await context.bot.send_voice(chat_id=tg_id, voice=msg.voice.file_id)
+        elif msg.document:
+            await context.bot.send_document(chat_id=tg_id, document=msg.document.file_id)
+        await msg.reply_text("Ответ отправлен пользователю " + str(tg_id))
+    except Exception as e:
+        await msg.reply_text("Ошибка отправки: " + str(e))
+
+
 def main():
     if not TOKEN:
         logger.error("BOT_TOKEN не установлен!")
@@ -1179,6 +1328,11 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_i_program, pattern="^i_program$"))
     app.add_handler(CallbackQueryHandler(cb_i_results, pattern="^i_results$"))
     app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
+    app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support))
+    # Поддержка — пересылка сообщений
+    app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support))
 
     logger.info("Программа Преображения bot started ✅")
 
