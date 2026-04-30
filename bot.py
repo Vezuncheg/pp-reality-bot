@@ -18,6 +18,7 @@ PAY_URL   = "https://pp-reality.ru/pay.html"
 PAY_PROMO = "https://pp-reality.ru/pay.html?promo=1"
 PAYMENT_URL = PAY_URL
 PHOTOS_URL = "https://raw.githubusercontent.com/Vezuncheg/fitstate/main/images"
+SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "-1003977221459"))
 
 ASK_GENDER, ASK_AGE, ASK_WEIGHT, ASK_HEIGHT, ASK_GOAL = range(5)
 
