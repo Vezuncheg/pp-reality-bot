@@ -1301,7 +1301,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎭 *Архетипы:*\n{arch_lines}\n"
             f"🔢 *События:*\n{event_lines}"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {e}")
 
@@ -1395,7 +1395,12 @@ async def restore_funnels(application):
                     continue  # уже отправлен
 
                 # Считаем задержку
-                delay = max(0, (send_at - now).total_seconds())
+                delay = (send_at - now).total_seconds()
+
+                # Если время уже прошло — отправляем немедленно (не пропускаем)
+                if delay < 0:
+                    delay = 5  # небольшая задержка чтобы бот успел запуститься
+                    logger.info(f"Блок {block_key} для uid={tg_id} просрочен, отправляем через 5с")
 
                 # Планируем задачу
                 _uid = tg_id
