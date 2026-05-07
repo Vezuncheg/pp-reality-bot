@@ -223,6 +223,12 @@ async def schedule_dojim(uid, context):
                 [InlineKeyboardButton("Записаться →", url=f"{PAY_URL}?tg_id={uid}")],
             ])
         )
+        # Помечаем как выполненный — при следующем деплое не будет восстанавливаться
+        try:
+            from db import funnel_mark_block as _mark_d1h
+            _mark_d1h(uid, "d1h")
+        except Exception as e:
+            logger.error(f"funnel_mark_block d1h error: {e}")
 
     # ── Блок 1: Об Иване (день 1) ──
     async def block1(ctx):
@@ -354,6 +360,12 @@ async def schedule_dojim(uid, context):
             ])
         )
 
+        # Помечаем b1 как выполненный
+        try:
+            from db import funnel_mark_block as _mark_b1
+            _mark_b1(uid, "b1")
+        except Exception as e:
+            logger.error(f"funnel_mark_block b1 error: {e}")
         # Запускаем следующий непросмотренный блок
         await schedule_next_unseen(uid, "b1", ctx)
 
@@ -1394,13 +1406,13 @@ async def restore_funnels(application):
                 if block_key in sent:
                     continue  # уже отправлен
 
-                # Считаем задержку
+                # Считаем задержку — только будущие задачи
                 delay = (send_at - now).total_seconds()
-
-                # Если время уже прошло — отправляем немедленно (не пропускаем)
                 if delay < 0:
-                    delay = 5  # небольшая задержка чтобы бот успел запуститься
-                    logger.info(f"Блок {block_key} для uid={tg_id} просрочен, отправляем через 5с")
+                    # Время уже прошло — задача либо выполнена, либо потеряна при деплое
+                    # В обоих случаях пропускаем — blocks_sent должен был быть обновлён
+                    logger.info(f"Блок {block_key} для uid={tg_id} в прошлом, пропускаем")
+                    continue
 
                 # Планируем задачу
                 _uid = tg_id
@@ -1454,6 +1466,7 @@ async def _dispatch_block_by_key(uid: int, block_key: str, ctx):
                 ])
             )
             _mark(uid, "d1h")
+            logger.info(f"d1h выполнен и помечен для uid={uid}")
         elif block_key == "b1":
             await _exec_block1(uid, bot, jq)
             _mark(uid, "b1", "b2", datetime.now() + __import__('datetime').timedelta(seconds=86400))
