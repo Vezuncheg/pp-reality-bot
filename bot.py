@@ -1350,10 +1350,14 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         failed = 0
         for tg_id in users:
             try:
+                # Подставляем персональную ссылку с tg_id для каждого пользователя
+                personal_url = f"{PAY_URL}?tg_id={tg_id}"
+                personal_text = text.replace("{ссылка}", personal_url)
                 await context.bot.send_message(
                     chat_id=tg_id,
-                    text=text,
-                    parse_mode="Markdown"
+                    text=personal_text,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
                 )
                 sent += 1
                 await asyncio.sleep(0.05)  # защита от flood limit
@@ -1367,6 +1371,40 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Рассылка завершена!\n\n"
             f"Отправлено: *{sent}*\n"
             f"Ошибок: *{failed}*",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
+async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /broadcast_test <текст> — тестовая рассылка только себе (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        await update.message.reply_text(
+            "Использование: /broadcast_test Текст сообщения\n\n"
+            "Используйте {ссылка} для персональной ссылки с tg_id.\n"
+            "Пример: [Выбрать тариф →]({ссылка})"
+        )
+        return
+
+    try:
+        personal_url = f"{PAY_URL}?tg_id={uid}"
+        personal_text = text.replace("{ссылка}", personal_url)
+        await context.bot.send_message(
+            chat_id=uid,
+            text=f"🧪 *ТЕСТ РАССЫЛКИ*\n\n{personal_text}",
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+        await update.message.reply_text(
+            f"✅ Тест отправлен!\n\nПерейдите по ссылке и проверьте что tg\\_id подставился:\n`{personal_url}`",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -1506,6 +1544,7 @@ def main():
             BotCommand("export",    "📥 Выгрузить базу данных"),
             BotCommand("stats",     "📈 Статистика (админ)"),
             BotCommand("broadcast", "📢 Рассылка (админ)"),
+            BotCommand("broadcast_test", "🧪 Тест рассылки (админ)"),
         ])
         logger.info("Команды меню установлены ✅")
 
@@ -1558,6 +1597,7 @@ def main():
     app.add_handler(CommandHandler("export",    cmd_export))
     app.add_handler(CommandHandler("stats",     cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
     app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
