@@ -1185,6 +1185,11 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if msg.text and msg.text.startswith('/'):
         return
 
+    # Не пересылаем сообщения от админа
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid == admin_id:
+        return
+
     # Не пересылаем если пользователь проходит анкету
     if context.user_data.get("in_quiz"):
         return
