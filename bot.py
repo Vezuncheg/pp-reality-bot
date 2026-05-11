@@ -1319,96 +1319,105 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /broadcast <текст> — рассылка всем пользователям (только для админа)."""
+    """Команда /broadcast — рассылка всем пользователям (только для админа)."""
     uid = update.effective_user.id
     admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
     if uid != admin_id:
         await update.message.reply_text("⛔ Нет доступа.")
         return
 
-    text = " ".join(context.args) if context.args else ""
-    if not text:
-        await update.message.reply_text(
-            "Использование: /broadcast Текст сообщения\n\n"
-            "Поддерживается Markdown разметка."
-        )
-        return
-
-    try:
-        from db import get_broadcast_users as _get_users, log_event as _log
-        users = _get_users()
-        if not users:
-            await update.message.reply_text("Нет пользователей для рассылки.")
-            return
-
-        await update.message.reply_text(
-            f"📢 Начинаю рассылку для *{len(users)}* пользователей...",
-            parse_mode="Markdown"
-        )
-
-        sent = 0
-        failed = 0
-        for tg_id in users:
-            try:
-                # Подставляем персональную ссылку с tg_id для каждого пользователя
-                personal_url = f"{PAY_URL}?tg_id={tg_id}"
-                personal_text = text.replace("{ссылка}", personal_url)
-                await context.bot.send_message(
-                    chat_id=tg_id,
-                    text=personal_text,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-                sent += 1
-                await asyncio.sleep(0.05)  # защита от flood limit
-            except Exception:
-                failed += 1
-
-        # Логируем рассылку
-        _log(uid, "broadcast_sent", f"sent={sent} failed={failed}")
-
-        await update.message.reply_text(
-            f"✅ Рассылка завершена!\n\n"
-            f"Отправлено: *{sent}*\n"
-            f"Ошибок: *{failed}*",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
+    context.user_data["waiting_broadcast"] = True
+    await update.message.reply_text(
+        "📝 Отправьте текст рассылки следующим сообщением.\n\n"
+        "Используйте {ссылка} для персональной ссылки с tg_id.\n"
+        "Пример: [Выбрать тариф →]({ссылка})"
+    )
 
 
 async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /broadcast_test <текст> — тестовая рассылка только себе (только для админа)."""
+    """Команда /broadcast_test — тестовая рассылка только себе (только для админа)."""
     uid = update.effective_user.id
     admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
     if uid != admin_id:
         await update.message.reply_text("⛔ Нет доступа.")
         return
 
-    text = " ".join(context.args) if context.args else ""
-    if not text:
-        await update.message.reply_text(
-            "Использование: /broadcast_test Текст сообщения\n\n"
-            "Используйте {ссылка} для персональной ссылки с tg_id.\n"
-            "Пример: [Выбрать тариф →]({ссылка})"
-        )
+    context.user_data["waiting_broadcast_test"] = True
+    await update.message.reply_text(
+        "📝 Отправьте текст рассылки следующим сообщением.\n\n"
+        "Используйте {ссылка} для персональной ссылки с tg_id.\n"
+        "Пример: [Выбрать тариф →]({ссылка})"
+    )
+
+
+async def cmd_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ждёт текст рассылки следующим сообщением после /broadcast_test или /broadcast."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
         return
 
-    try:
-        personal_url = f"{PAY_URL}?tg_id={uid}"
-        personal_text = text.replace("{ссылка}", personal_url)
-        await context.bot.send_message(
-            chat_id=uid,
-            text=f"🧪 *ТЕСТ РАССЫЛКИ*\n\n{personal_text}",
-            parse_mode="Markdown",
-            disable_web_page_preview=True
-        )
-        await update.message.reply_text(
-            f"✅ Тест отправлен!\n\nПерейдите по ссылке и проверьте что tg\\_id подставился:\n`{personal_url}`",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
+    # Тест рассылки — отправляем только себе
+    if context.user_data.get("waiting_broadcast_test"):
+        context.user_data["waiting_broadcast_test"] = False
+        text = update.message.text
+        try:
+            personal_url = f"{PAY_URL}?tg_id={uid}"
+            personal_text = text.replace("{ссылка}", personal_url)
+            await context.bot.send_message(
+                chat_id=uid,
+                text=personal_text,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+            await update.message.reply_text(
+                f"✅ Тест отправлен! Проверьте как выглядит выше.\n\nСсылка с вашим tg\\_id:\n`{personal_url}`",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {e}")
+        return
+
+    # Основная рассылка — ждём текст после /broadcast
+    if context.user_data.get("waiting_broadcast"):
+        context.user_data["waiting_broadcast"] = False
+        text = update.message.text
+        try:
+            from db import get_broadcast_users as _get_users, log_event as _log
+            users = _get_users()
+            if not users:
+                await update.message.reply_text("Нет пользователей для рассылки.")
+                return
+
+            await update.message.reply_text(
+                f"📢 Начинаю рассылку для *{len(users)}* пользователей...",
+                parse_mode="Markdown"
+            )
+
+            sent = 0
+            failed = 0
+            for tg_id in users:
+                try:
+                    personal_url = f"{PAY_URL}?tg_id={tg_id}"
+                    personal_text = text.replace("{ссылка}", personal_url)
+                    await context.bot.send_message(
+                        chat_id=tg_id,
+                        text=personal_text,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True
+                    )
+                    sent += 1
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    failed += 1
+
+            _log(uid, "broadcast_sent", f"sent={sent} failed={failed}")
+            await update.message.reply_text(
+                f"✅ Рассылка завершена!\n\nОтправлено: *{sent}*\nОшибок: *{failed}*",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {e}")
 
 
 async def restore_funnels(application):
@@ -1610,7 +1619,13 @@ def main():
     # group=1 означает что ConversationHandler (group=0) обрабатывается первым
     # и если он взял сообщение — forward_to_support не вызывается
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=1)
+    # Хендлер для текста рассылки от админа (group=1, после ConversationHandler)
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.User(admin_id),
+        cmd_broadcast_send
+    ), group=1)
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=2)
 
     logger.info("Программа Преображения bot started ✅")
 
