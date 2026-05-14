@@ -1339,6 +1339,64 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /invite <tg_id> — генерирует ссылки на канал и чат для пользователя (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Использование: /invite <tg_id>\nПример: /invite 1423869511")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Ошибка: tg_id должен быть числом.")
+        return
+
+    channel_id = int(os.getenv("CHANNEL_ID", "0"))
+    club_chat_id = int(os.getenv("CLUB_CHAT_ID", "0"))
+
+    try:
+        links = []
+
+        if channel_id:
+            channel_link = await context.bot.create_chat_invite_link(
+                chat_id=channel_id,
+                member_limit=1,
+                name=f"invite_{target_id}"
+            )
+            links.append(f"📺 Канал: {channel_link.invite_link}")
+
+        if club_chat_id:
+            chat_link = await context.bot.create_chat_invite_link(
+                chat_id=club_chat_id,
+                member_limit=1,
+                name=f"invite_{target_id}"
+            )
+            links.append(f"💬 Чат: {chat_link.invite_link}")
+
+        if links:
+            links_text = "\n".join(links)
+            await update.message.reply_text(
+                f"✅ Ссылки для пользователя {target_id}:\n\n{links_text}"
+            )
+            # Отправляем пользователю
+            await context.bot.send_message(
+                chat_id=target_id,
+                text="Ваши персональные ссылки для доступа:\n\n" + links_text
+            )
+            await update.message.reply_text(f"✅ Ссылки также отправлены пользователю {target_id}")
+        else:
+            await update.message.reply_text("Ошибка: CHANNEL_ID и CLUB_CHAT_ID не заданы.")
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
 async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /broadcast_test — тестовая рассылка только себе (только для админа)."""
     uid = update.effective_user.id
@@ -1559,6 +1617,7 @@ def main():
             BotCommand("stats",     "📈 Статистика (админ)"),
             BotCommand("broadcast", "📢 Рассылка (админ)"),
             BotCommand("broadcast_test", "🧪 Тест рассылки (админ)"),
+            BotCommand("invite", "🔗 Выдать доступ вручную (админ)"),
         ])
         logger.info("Команды меню установлены ✅")
 
@@ -1611,6 +1670,7 @@ def main():
     app.add_handler(CommandHandler("export",    cmd_export))
     app.add_handler(CommandHandler("stats",     cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CommandHandler("invite", cmd_invite))
     app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
