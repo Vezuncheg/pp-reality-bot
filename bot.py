@@ -1477,7 +1477,44 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _start_broadcast_flow(update, context, is_test=False)
 
 
-async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /broadcast_test — тестовая рассылка только себе (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+    await _start_broadcast_flow(update, context, is_test=True)
+
+
+async def cmd_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получает фото или текст в нужном шаге флоу рассылки."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        return
+
+    step = context.user_data.get("broadcast_step")
+    if not step:
+        return
+
+    if step == "wait_photo" and update.message.photo:
+        context.user_data["broadcast_photo"] = update.message.photo[-1].file_id
+        context.user_data["broadcast_step"] = "ask_text"
+        await update.message.reply_text(
+            "✅ Фото получено!\n\n📝 Добавить текст к рассылке?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Да, добавлю текст", callback_data="bc_text_yes")],
+                [InlineKeyboardButton("❌ Нет, только фото", callback_data="bc_text_no")],
+            ])
+        )
+    elif step == "wait_text" and update.message.text:
+        context.user_data["broadcast_text"] = update.message.text
+        context.user_data["broadcast_step"] = "confirm"
+        await _show_broadcast_confirm(update.message, context)
+
+
+
     """Команда /invite <tg_id> — генерирует ссылки на канал и чат для пользователя (только для админа)."""
     uid = update.effective_user.id
     admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
