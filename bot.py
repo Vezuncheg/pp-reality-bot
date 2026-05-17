@@ -1323,6 +1323,150 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка: {e}")
 
 
+async def _start_broadcast_flow(update, context, is_test=False):
+    """Запускает флоу рассылки."""
+    context.user_data["broadcast_is_test"] = is_test
+    context.user_data["broadcast_photo"] = None
+    context.user_data["broadcast_text"] = None
+    context.user_data["broadcast_step"] = "ask_photo"
+    label = "🧪 ТЕСТ" if is_test else "📢 РАССЫЛКА"
+    await update.message.reply_text(
+        f"{label}\n\n📸 Прикрепить фото к рассылке?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Да, загружу фото", callback_data="bc_photo_yes")],
+            [InlineKeyboardButton("❌ Нет, только текст", callback_data="bc_photo_no")],
+        ])
+    )
+
+
+async def cb_broadcast_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает кнопки флоу рассылки."""
+    q = update.callback_query
+    await q.answer()
+    data = q.data
+    uid = q.from_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        return
+
+    if data == "bc_photo_yes":
+        context.user_data["broadcast_step"] = "wait_photo"
+        await q.message.reply_text("📸 Отправьте фото следующим сообщением:")
+
+    elif data == "bc_photo_no":
+        context.user_data["broadcast_step"] = "wait_text"
+        await q.message.reply_text(
+            "📝 Отправьте текст рассылки следующим сообщением.\n\n"
+            "Используйте {ссылка} для персональной ссылки.\n"
+            "Пример: [Выбрать тариф →]({ссылка})"
+        )
+
+    elif data == "bc_text_yes":
+        context.user_data["broadcast_step"] = "wait_text"
+        await q.message.reply_text(
+            "📝 Отправьте текст рассылки следующим сообщением.\n\n"
+            "Используйте {ссылка} для персональной ссылки.\n"
+            "Пример: [Выбрать тариф →]({ссылка})"
+        )
+
+    elif data == "bc_text_no":
+        context.user_data["broadcast_step"] = "confirm"
+        await _show_broadcast_confirm(q.message, context)
+
+    elif data == "bc_confirm_yes":
+        context.user_data["broadcast_step"] = None
+        await _do_broadcast(q.message, context)
+
+    elif data == "bc_confirm_no":
+        context.user_data["broadcast_step"] = None
+        context.user_data["broadcast_photo"] = None
+        context.user_data["broadcast_text"] = None
+        await q.message.reply_text("❌ Рассылка отменена.")
+
+
+async def _show_broadcast_confirm(message, context):
+    """Показывает превью и кнопки подтверждения."""
+    is_test = context.user_data.get("broadcast_is_test", False)
+    photo = context.user_data.get("broadcast_photo")
+    text = context.user_data.get("broadcast_text", "")
+    label = "🧪 Тест (только вам)" if is_test else "📢 Всем пользователям"
+
+    parts = []
+    if photo:
+        parts.append("✅ Фото: есть")
+    else:
+        parts.append("❌ Фото: нет")
+    if text:
+        parts.append(f"✅ Текст: {text[:80]}...")
+    else:
+        parts.append("❌ Текст: нет")
+
+    await message.reply_text(
+        f"Готово к отправке ({label}):\n\n" + "\n".join(parts) + "\n\nОтправить?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Отправить", callback_data="bc_confirm_yes")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="bc_confirm_no")],
+        ])
+    )
+
+
+async def _do_broadcast(message, context):
+    """Выполняет рассылку."""
+    is_test = context.user_data.get("broadcast_is_test", False)
+    photo = context.user_data.get("broadcast_photo")
+    text = context.user_data.get("broadcast_text", "")
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+
+    if is_test:
+        users = [admin_id]
+        await message.reply_text("🧪 Отправляю тест...")
+    else:
+        from db import get_broadcast_users as _get_users
+        users = _get_users()
+        await message.reply_text(f"📢 Начинаю рассылку для {len(users)} пользователей...")
+
+    sent = 0
+    failed = 0
+    for tg_id in users:
+        try:
+            personal_url = f"{PAY_URL}?tg_id={tg_id}"
+            personal_text = text.replace("{ссылка}", personal_url) if text else None
+
+            if photo and personal_text:
+                # Фото + текст отдельным сообщением
+                await context.bot.send_photo(chat_id=tg_id, photo=photo)
+                await asyncio.sleep(0.3)
+                await context.bot.send_message(
+                    chat_id=tg_id,
+                    text=personal_text,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
+            elif photo:
+                await context.bot.send_photo(chat_id=tg_id, photo=photo)
+            elif personal_text:
+                await context.bot.send_message(
+                    chat_id=tg_id,
+                    text=personal_text,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            failed += 1
+
+    try:
+        from db import log_event as _log
+        _log(admin_id, "broadcast_sent", f"sent={sent} failed={failed}")
+    except Exception:
+        pass
+
+    await message.reply_text(
+        f"✅ Готово!\n\nОтправлено: {sent}\nОшибок: {failed}"
+    )
+
+
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /broadcast — рассылка всем пользователям (только для админа)."""
     uid = update.effective_user.id
@@ -1330,13 +1474,7 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid != admin_id:
         await update.message.reply_text("⛔ Нет доступа.")
         return
-
-    context.user_data["waiting_broadcast"] = True
-    await update.message.reply_text(
-        "📝 Отправьте текст рассылки следующим сообщением.\n\n"
-        "Используйте {ссылка} для персональной ссылки с tg_id.\n"
-        "Пример: [Выбрать тариф →]({ссылка})"
-    )
+    await _start_broadcast_flow(update, context, is_test=False)
 
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1384,7 +1522,6 @@ async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"✅ Ссылки для пользователя {target_id}:\n\n{links_text}"
             )
-            # Отправляем пользователю
             await context.bot.send_message(
                 chat_id=target_id,
                 text="Ваши персональные ссылки для доступа:\n\n" + links_text
@@ -1395,92 +1532,6 @@ async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {e}")
-
-
-async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /broadcast_test — тестовая рассылка только себе (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    context.user_data["waiting_broadcast_test"] = True
-    await update.message.reply_text(
-        "📝 Отправьте текст рассылки следующим сообщением.\n\n"
-        "Используйте {ссылка} для персональной ссылки с tg_id.\n"
-        "Пример: [Выбрать тариф →]({ссылка})"
-    )
-
-
-async def cmd_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ждёт текст рассылки следующим сообщением после /broadcast_test или /broadcast."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        return
-
-    # Тест рассылки — отправляем только себе
-    if context.user_data.get("waiting_broadcast_test"):
-        context.user_data["waiting_broadcast_test"] = False
-        text = update.message.text
-        try:
-            personal_url = f"{PAY_URL}?tg_id={uid}"
-            personal_text = text.replace("{ссылка}", personal_url)
-            await context.bot.send_message(
-                chat_id=uid,
-                text=personal_text,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-            await update.message.reply_text(
-                f"✅ Тест отправлен! Проверьте как выглядит выше.\n\nСсылка с вашим tg\\_id:\n`{personal_url}`",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {e}")
-        return
-
-    # Основная рассылка — ждём текст после /broadcast
-    if context.user_data.get("waiting_broadcast"):
-        context.user_data["waiting_broadcast"] = False
-        text = update.message.text
-        try:
-            from db import get_broadcast_users as _get_users, log_event as _log
-            users = _get_users()
-            if not users:
-                await update.message.reply_text("Нет пользователей для рассылки.")
-                return
-
-            await update.message.reply_text(
-                f"📢 Начинаю рассылку для *{len(users)}* пользователей...",
-                parse_mode="Markdown"
-            )
-
-            sent = 0
-            failed = 0
-            for tg_id in users:
-                try:
-                    personal_url = f"{PAY_URL}?tg_id={tg_id}"
-                    personal_text = text.replace("{ссылка}", personal_url)
-                    await context.bot.send_message(
-                        chat_id=tg_id,
-                        text=personal_text,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True
-                    )
-                    sent += 1
-                    await asyncio.sleep(0.05)
-                except Exception:
-                    failed += 1
-
-            _log(uid, "broadcast_sent", f"sent={sent} failed={failed}")
-            await update.message.reply_text(
-                f"✅ Рассылка завершена!\n\nОтправлено: *{sent}*\nОшибок: *{failed}*",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {e}")
 
 
 async def restore_funnels(application):
@@ -1672,6 +1723,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("invite", cmd_invite))
     app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
+    app.add_handler(CallbackQueryHandler(cb_broadcast_flow, pattern="^bc_"))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
     app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
@@ -1684,10 +1736,10 @@ def main():
     # group=1 означает что ConversationHandler (group=0) обрабатывается первым
     # и если он взял сообщение — forward_to_support не вызывается
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
-    # Хендлер для текста рассылки от админа (group=1, после ConversationHandler)
+    # Хендлер для текста/фото рассылки от админа (group=1, после ConversationHandler)
     admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.User(admin_id),
+        (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & filters.User(admin_id),
         cmd_broadcast_send
     ), group=1)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=2)
