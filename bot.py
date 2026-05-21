@@ -1514,6 +1514,65 @@ async def cmd_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _show_broadcast_confirm(update.message, context)
 
 
+async def cmd_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /msg <tg_id> — отправить сообщение конкретному пользователю (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Использование: /msg <tg_id>\nПример: /msg 1423869511")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Ошибка: tg_id должен быть числом.")
+        return
+
+    context.user_data["msg_target_id"] = target_id
+    context.user_data["waiting_msg"] = True
+    await update.message.reply_text(
+        f"📝 Напишите сообщение для пользователя {target_id}.\n\nОтправьте его следующим сообщением:"
+    )
+
+
+async def cmd_msg_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет сообщение пользователю после /msg."""
+    uid = update.effective_user.id
+    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    if uid != admin_id:
+        return
+
+    if not context.user_data.get("waiting_msg"):
+        return
+
+    target_id = context.user_data.get("msg_target_id")
+    if not target_id:
+        return
+
+    context.user_data["waiting_msg"] = False
+    context.user_data["msg_target_id"] = None
+
+    try:
+        if update.message.photo:
+            await context.bot.send_photo(
+                chat_id=target_id,
+                photo=update.message.photo[-1].file_id,
+                caption=update.message.caption or ""
+            )
+        elif update.message.text:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=update.message.text
+            )
+        await update.message.reply_text(f"✅ Сообщение отправлено пользователю {target_id}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /invite <tg_id> — генерирует ссылки на канал и чат для пользователя (только для админа)."""
     uid = update.effective_user.id
@@ -1754,6 +1813,7 @@ def main():
             BotCommand("broadcast", "📢 Рассылка (админ)"),
             BotCommand("broadcast_test", "🧪 Тест рассылки (админ)"),
             BotCommand("invite", "🔗 Выдать доступ вручную (админ)"),
+            BotCommand("msg", "✉️ Написать пользователю (админ)"),
         ])
         logger.info("Команды меню установлены ✅")
 
@@ -1807,6 +1867,7 @@ def main():
     app.add_handler(CommandHandler("stats",     cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("invite", cmd_invite))
+    app.add_handler(CommandHandler("msg", cmd_msg))
     app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
     app.add_handler(CallbackQueryHandler(cb_broadcast_flow, pattern="^bc_"))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
@@ -1821,11 +1882,16 @@ def main():
     # group=1 означает что ConversationHandler (group=0) обрабатывается первым
     # и если он взял сообщение — forward_to_support не вызывается
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
-    # Хендлер для текста/фото рассылки от админа (group=1, после ConversationHandler)
+    # Хендлер для текста/фото от админа — рассылка или личное сообщение (group=1)
     admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
+    async def admin_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if context.user_data.get("waiting_msg"):
+            await cmd_msg_send(update, context)
+        elif context.user_data.get("broadcast_step"):
+            await cmd_broadcast_send(update, context)
     app.add_handler(MessageHandler(
         (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & filters.User(admin_id),
-        cmd_broadcast_send
+        admin_message_router
     ), group=1)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=2)
 
