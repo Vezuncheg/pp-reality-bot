@@ -539,8 +539,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Парсим start параметр: архетип|utm_source|utm_medium|utm_campaign
     raw_start = (context.args or [None])[0]
     utm_source = utm_medium = utm_campaign = None
-    if raw_start and '|' in raw_start:
-        parts = raw_start.split('|')
+    if raw_start and '__' in raw_start:
+        parts = raw_start.split('__')
         arch_key = parts[0]
         utm_source   = parts[1] if len(parts) > 1 and parts[1] else None
         utm_medium   = parts[2] if len(parts) > 2 and parts[2] else None
