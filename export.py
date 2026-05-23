@@ -26,18 +26,19 @@ def export_to_excel() -> bytes:
     ws1 = wb.active
     ws1.title = "Платежи"
     headers1 = ["#", "Имя", "Email", "Telegram ID", "Username",
-                "Тариф", "Сумма ₽", "Дата оплаты", "Клуб до", "Статус"]
+                "Тариф", "Сумма ₽", "Дата оплаты", "Клуб до", "Статус",
+                "UTM Source", "UTM Medium", "UTM Campaign"]
     make_header(ws1, headers1)
     for i, row in enumerate(get_all_payments(), 2):
         for j, val in enumerate(row, 1):
             ws1.cell(row=i, column=j, value=val)
-    set_widths(ws1, [5, 20, 25, 15, 15, 20, 10, 20, 20, 10])
+    set_widths(ws1, [5, 20, 25, 15, 15, 20, 10, 20, 20, 10, 15, 15, 20])
 
     # ── Лист 2: Пользователи ───────────────────────────────
     ws2 = wb.create_sheet("Пользователи")
     headers2 = ["Telegram ID", "Username", "Имя", "Первый визит", "Последний визит",
                 "Запусков", "Архетип", "Пол", "Возраст", "Вес", "Рост", "Цель",
-                "Тариф", "Сумма ₽", "Дата оплаты"]
+                "Тариф", "Сумма ₽", "Дата оплаты", "UTM Source", "UTM Medium", "UTM Campaign", "Ответы теста"]
     make_header(ws2, headers2, color="059669")
 
     arch_names = {
@@ -56,7 +57,7 @@ def export_to_excel() -> bytes:
     for i, row in enumerate(get_all_users(), 2):
         (tg_id, username, full_name, first_seen, last_seen,
          start_count, archetype, gender, age, weight, height, goal,
-         plan, amount, paid_at) = row
+         plan, amount, paid_at, utm_source, utm_medium, utm_campaign, quiz_answers) = row
 
         ws2.cell(row=i, column=1, value=tg_id)
         ws2.cell(row=i, column=2, value=f"@{username}" if username else "—")
@@ -73,8 +74,12 @@ def export_to_excel() -> bytes:
         ws2.cell(row=i, column=13, value=plan)
         ws2.cell(row=i, column=14, value=amount)
         ws2.cell(row=i, column=15, value=str(paid_at)[:16] if paid_at and paid_at != "—" else "—")
+        ws2.cell(row=i, column=16, value=utm_source or "—")
+        ws2.cell(row=i, column=17, value=utm_medium or "—")
+        ws2.cell(row=i, column=18, value=utm_campaign or "—")
+        ws2.cell(row=i, column=19, value=quiz_answers or "—")
 
-    set_widths(ws2, [15, 18, 20, 18, 18, 8, 18, 10, 8, 8, 8, 15, 20, 10, 18])
+    set_widths(ws2, [15, 18, 20, 18, 18, 8, 18, 10, 8, 8, 8, 15, 20, 10, 18, 15, 15, 20, 40])
 
     # ── Лист 3: События ────────────────────────────────────
     ws3 = wb.create_sheet("События")
