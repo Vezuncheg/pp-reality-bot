@@ -536,9 +536,22 @@ async def schedule_dojim(uid, context):
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    arch_key = (context.args or [None])[0]
+    # Парсим start параметр: архетип|utm_source|utm_medium|utm_campaign
+    raw_start = (context.args or [None])[0]
+    utm_source = utm_medium = utm_campaign = None
+    if raw_start and '|' in raw_start:
+        parts = raw_start.split('|')
+        arch_key = parts[0]
+        utm_source   = parts[1] if len(parts) > 1 and parts[1] else None
+        utm_medium   = parts[2] if len(parts) > 2 and parts[2] else None
+        utm_campaign = parts[3] if len(parts) > 3 and parts[3] else None
+    else:
+        arch_key = raw_start
     arch = ARCHETYPES.get(arch_key)
     context.user_data["arch_key"] = arch_key
+    context.user_data["utm_source"] = utm_source
+    context.user_data["utm_medium"] = utm_medium
+    context.user_data["utm_campaign"] = utm_campaign
 
     # Логируем пользователя и событие
     uid = update.effective_user.id
@@ -550,7 +563,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _log(uid, "start", arch_key or "direct")
         if arch_key:
             from db import user_update_profile as _profile
-            _profile(uid, archetype=arch_key)
+            _profile(uid, archetype=arch_key,
+                     utm_source=context.user_data.get("utm_source"),
+                     utm_medium=context.user_data.get("utm_medium"),
+                     utm_campaign=context.user_data.get("utm_campaign"))
     except Exception as e:
         logger.error(f"analytics start error: {e}")
 
@@ -713,11 +729,20 @@ async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from db import log_event as _log, user_update_profile as _profile
         _log(uid, "quiz_completed", f"goal={goal}")
+        # Сохраняем ответы анкеты
+        quiz_answers = (
+            f"пол={context.user_data.get('gender','?')} "
+            f"возраст={context.user_data.get('age','?')} "
+            f"вес={context.user_data.get('weight','?')} "
+            f"рост={context.user_data.get('height','?')} "
+            f"цель={goal}"
+        )
         _profile(uid, goal=goal,
                  weight=context.user_data.get("weight"),
                  height=context.user_data.get("height"),
                  age=context.user_data.get("age"),
-                 gender=context.user_data.get("gender"))
+                 gender=context.user_data.get("gender"),
+                 quiz_answers=quiz_answers)
     except Exception as e:
         logger.error(f"analytics quiz error: {e}")
 
