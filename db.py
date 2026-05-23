@@ -36,7 +36,10 @@ def init_db():
             club_until      TEXT,
             channel_link    TEXT,
             club_link       TEXT,
-            status          TEXT DEFAULT 'active'
+            status          TEXT DEFAULT 'active',
+            utm_source      TEXT,
+            utm_medium      TEXT,
+            utm_campaign    TEXT
         )
     """)
 
@@ -70,7 +73,11 @@ def init_db():
             age             INTEGER,
             weight          NUMERIC,
             height          NUMERIC,
-            goal            TEXT
+            goal            TEXT,
+            utm_source      TEXT,
+            utm_medium      TEXT,
+            utm_campaign    TEXT,
+            quiz_answers    TEXT
         )
     """)
 
@@ -87,6 +94,22 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_tg_id ON user_events(tg_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_event ON user_events(event)")
 
+    # Миграция — добавляем новые колонки если их нет
+    migrations = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS utm_source TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS utm_medium TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS utm_campaign TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS quiz_answers TEXT",
+        "ALTER TABLE payments ADD COLUMN IF NOT EXISTS utm_source TEXT",
+        "ALTER TABLE payments ADD COLUMN IF NOT EXISTS utm_medium TEXT",
+        "ALTER TABLE payments ADD COLUMN IF NOT EXISTS utm_campaign TEXT",
+    ]
+    for m in migrations:
+        try:
+            cur.execute(m)
+        except Exception:
+            pass
+
     conn.commit()
     cur.close()
     conn.close()
@@ -98,11 +121,24 @@ def init_db():
 def save_payment(data: dict):
     conn = get_conn()
     cur = conn.cursor()
+    # Берём UTM из таблицы users если не переданы явно
+    utm_source = data.get("utm_source")
+    utm_medium = data.get("utm_medium")
+    utm_campaign = data.get("utm_campaign")
+    if not utm_source and data.get("tg_id"):
+        try:
+            cur.execute("SELECT utm_source, utm_medium, utm_campaign FROM users WHERE tg_id=%s", (data["tg_id"],))
+            row = cur.fetchone()
+            if row:
+                utm_source, utm_medium, utm_campaign = row
+        except Exception:
+            pass
     cur.execute("""
         INSERT INTO payments
         (payment_id, tg_id, tg_username, name, email, plan, plan_name,
-         amount, paid_at, club_until, channel_link, club_link, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+         amount, paid_at, club_until, channel_link, club_link, status,
+         utm_source, utm_medium, utm_campaign)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (payment_id) DO UPDATE SET
             channel_link = EXCLUDED.channel_link,
             club_link    = EXCLUDED.club_link,
@@ -113,7 +149,8 @@ def save_payment(data: dict):
         data["plan"], data["plan_name"], data["amount"],
         data["paid_at"], data.get("club_until"),
         data.get("channel_link"), data.get("club_link"),
-        data.get("status", "active")
+        data.get("status", "active"),
+        utm_source, utm_medium, utm_campaign
     ))
     conn.commit()
     cur.close()
@@ -154,7 +191,8 @@ def get_all_payments():
     cur = conn.cursor()
     cur.execute("""
         SELECT id, name, email, tg_id, tg_username, plan_name,
-               amount, paid_at, club_until, status
+               amount, paid_at, club_until, status,
+               utm_source, utm_medium, utm_campaign
         FROM payments ORDER BY paid_at DESC
     """)
     rows = cur.fetchall()
@@ -275,7 +313,9 @@ def user_upsert(tg_id: int, username: str = None, full_name: str = None):
 
 def user_update_profile(tg_id: int, archetype: str = None, gender: str = None,
                         age: int = None, weight: float = None,
-                        height: float = None, goal: str = None):
+                        height: float = None, goal: str = None,
+                        utm_source: str = None, utm_medium: str = None,
+                        utm_campaign: str = None, quiz_answers: str = None):
     """Сохраняет данные анкеты пользователя."""
     try:
         conn = get_conn()
@@ -283,7 +323,9 @@ def user_update_profile(tg_id: int, archetype: str = None, gender: str = None,
         fields = []
         values = []
         for col, val in [("archetype", archetype), ("gender", gender), ("age", age),
-                         ("weight", weight), ("height", height), ("goal", goal)]:
+                         ("weight", weight), ("height", height), ("goal", goal),
+                         ("utm_source", utm_source), ("utm_medium", utm_medium),
+                         ("utm_campaign", utm_campaign), ("quiz_answers", quiz_answers)]:
             if val is not None:
                 fields.append(f"{col} = %s")
                 values.append(val)
@@ -305,7 +347,8 @@ def get_all_users():
                u.start_count, u.archetype, u.gender, u.age, u.weight, u.height, u.goal,
                COALESCE(p.plan_name, '—') as plan,
                COALESCE(p.amount::text, '—') as amount,
-               COALESCE(p.paid_at, '—') as paid_at
+               COALESCE(p.paid_at, '—') as paid_at,
+               u.utm_source, u.utm_medium, u.utm_campaign, u.quiz_answers
         FROM users u
         LEFT JOIN payments p ON p.tg_id = u.tg_id AND p.status = 'active'
         ORDER BY u.first_seen DESC
