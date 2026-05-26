@@ -1203,6 +1203,12 @@ async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not msg:
         return
     uid = msg.from_user.id
+
+    # Пересылаем ТОЛЬКО личные сообщения боту (private чат)
+    # Сообщения из каналов, групп потока и чатов — игнорируем
+    if msg.chat.type != "private":
+        return
+
     # Не пересылаем сообщения из самой группы поддержки
     if msg.chat.id == SUPPORT_GROUP_ID:
         return
