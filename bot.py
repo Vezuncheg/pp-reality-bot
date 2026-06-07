@@ -1,1935 +1,409 @@
-import os
-import logging
-import asyncio
-from datetime import datetime
-import httpx
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes, ConversationHandler
-)
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Реалити #ПП «Программа Преображения» — Выберите тариф</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d12;--card:#15151f;--card2:#1a1a28;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --purple:#7c3aed;--purpleL:#9d5ff7;--purpleXL:#c4b5fd;
+  --green:#4ade80;--greenD:#22c55e;
+  --amber:#f59e0b;--amberL:#fcd34d;
+  --text:#f0effe;--muted:#7c7a96;--mutedL:#a09dbf;
+  --r:16px;--rsm:10px;
+}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden;min-height:100vh}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px}
+.grad{background:linear-gradient(130deg,var(--purpleL),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+/* NAV */
+nav{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;background:rgba(13,13,18,.92);backdrop-filter:blur(18px);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.logo{font-size:20px;font-weight:900;background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.nav-back{font-size:13px;color:var(--muted);text-decoration:none;display:flex;align-items:center;gap:6px}
+.nav-back:hover{color:var(--text)}
 
-TOKEN = os.environ.get("BOT_TOKEN", "")
-QUIZ_URL  = "https://pp-reality.ru"
-PAY_URL   = "https://pp-reality.ru/pay.html"
-PAY_PROMO = "https://pp-reality.ru/pay.html?promo=1"
-PAYMENT_URL = PAY_URL
-PHOTOS_URL = "https://raw.githubusercontent.com/Vezuncheg/fitstate/main/images"
-SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "-1003977221459"))
+/* HERO */
+.hero{padding:52px 0 40px;text-align:center;background:radial-gradient(ellipse 80% 50% at 50% 0%,rgba(124,58,237,.13) 0%,transparent 70%),var(--bg)}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.25);color:var(--green);padding:7px 18px;border-radius:100px;font-size:12px;font-weight:700;margin-bottom:20px}
+.hero h1{font-size:clamp(26px,5vw,44px);font-weight:900;line-height:1.1;margin-bottom:14px}
+.hero-sub{font-size:16px;color:var(--muted);max-width:520px;margin:0 auto 28px;line-height:1.7}
 
-ASK_GENDER, ASK_AGE, ASK_WEIGHT, ASK_HEIGHT, ASK_GOAL = range(5)
+/* PROMO BANNER */
+.promo-banner{display:none;max-width:560px;margin:0 auto 32px;background:linear-gradient(135deg,rgba(124,58,237,.18),rgba(74,222,128,.1));border:1px solid rgba(124,58,237,.35);border-radius:var(--r);padding:16px 24px;text-align:center}
+.promo-banner.show{display:block}
+.promo-banner p{font-size:14px;color:var(--purpleXL);margin-bottom:8px}
+.promo-banner strong{color:#fff}
+.timer-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:22px;font-weight:800;color:#fff}
+.timer-sep{color:var(--muted);font-size:18px}
+.timer-block{display:flex;flex-direction:column;align-items:center;gap:2px}
+.timer-label{font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.06em}
 
-ARCHETYPES = {
-    "emotional_eater": {
-        "emoji": "😰", "name": "Эмоциональный едок",
-        "problem": "Вы не срываетесь потому что слабый.\nВы срываетесь, потому что мозг выучил паттерн:\nстресс → еда → легче.\n\nЭто не вопрос силы воли — это вопрос замены инструмента.\nБез работы с этим — любая диета временная.",
-        "cycle": "🔴 Что происходит у Вас:\n\n→ Стресс активирует тягу к еде\n→ Ты ешь — становится легче\n→ Потом вина → ещё стресс → снова ешь\n→ Круг замкнулся",
-        "solution": "✅ Что реально помогает:\n\n→ Замечать триггер до того, как рука потянулась\n→ Заменить еду другим инструментом снятия стресса\n→ Убрать провоцирующие ситуации заранее\n\nЭто навык. Ему можно научиться за 3–4 недели.",
-        "tools": "🛠 Что добавим в Вашем случае:\n\n1️⃣ Техники прерывания эмоционального триггера — заметите импульс до того, как потянулись к еде\n2️⃣ Быстрые замены — 3–4 инструмента снятия стресса без еды\n3️⃣ Структуру питания — уберём ситуации, где срыв наиболее вероятен",
-        "day3": "📌 Топ-3 ошибки эмоционального едока:\n\n1. Держать дома запасы любимой еды\n2. Пропускать приёмы пищи — голод усиливает триггер\n3. Бороться силой воли — нужно переключать, не бороться",
-        "proof": "Анна, 34 года — минус 11 кг за 28 дней.\nПерестала есть от стресса уже на 2-й неделе.\n\nМихаил, 31 год — минус 9 кг. Впервые не сорвался ни разу.",
-    },
-    "social_hostage": {
-        "emoji": "🍕", "name": "Социальный заложник",
-        "problem": "Наедине с собой Вы держитесь отлично.\nНо любое застолье или компания — всё рушится.\n\nЭто не слабость характера — это отсутствие конкретной стратегии.",
-        "cycle": "🔴 Что происходит у Вас:\n\n→ Всю неделю держишься — приходит праздник\n→ Неловко отказывать, не хочешь выделяться\n→ Ешь как все — прогресс обнуляется\n→ Снова с понедельника",
-        "solution": "✅ Что реально помогает:\n\n→ Конкретные сценарии: кафе, корпоратив, застолье\n→ Фразы-ответы, которые не обидят\n→ Правило 80/20 — как позволять себе без ущерба\n\nЭто навык, а не сила воли.",
-        "tools": "🛠 Что добавим в Вашем случае:\n\n1️⃣ Стратегию поведения в любой компании — кафе, корпоратив, застолье\n2️⃣ Гибкую систему питания — любой праздник больше не обнуляет прогресс\n3️⃣ Конкретные фразы — как отказывать без обид и не выделяться",
-        "day3": "📌 Топ-3 ошибки социального заложника:\n\n1. Ждать подходящего момента — его не будет\n2. Избегать мероприятий — это не жизнь\n3. Есть про запас перед выходом — не работает",
-        "proof": "Катя, 29 лет — минус 8 кг без отказа от вечеринок.\n\nДмитрий, 36 лет — минус 10 кг. Рестораны с клиентами каждую неделю — ни одного срыва.",
-    },
-    "metabolic_skeptic": {
-        "emoji": "⚖️", "name": "Метаболический скептик",
-        "problem": "Вы едите немного, стараетесь, делаете всё правильно.\nА результата нет.\n\nСтандартные советы просто не подходят для Вашей ситуации.",
-        "cycle": "🔴 Что происходит у Вас:\n\n→ Ешь мало — вес стоит или растёт\n→ Добавляешь активность — результата нет\n→ Думаешь «мне не дано»\n→ Опускаешь руки",
-        "solution": "✅ Что реально помогает:\n\n→ Точный расчёт твоего реального коридора калорий\n→ Перезапуск обмена через правильный дефицит\n→ Работа с режимом сна и стрессом\n\nМетаболизм не сломан. Ему дают неправильный сигнал.",
-        "tools": "🛠 Что добавим в Вашем случае:\n\n1️⃣ Точный расчёт калорийности — реальный дефицит именно под Ваши параметры\n2️⃣ Правильный состав питания — соотношение БЖУ, которое запускает жиросжигание\n3️⃣ Работу с режимом — сон и стресс влияют на вес сильнее, чем многие думают",
-        "day3": "📌 Почему «мало ешь, но не худеешь»:\n\n1. Хроническое недоедание замедляет метаболизм\n2. Скрытые калории в «здоровых» продуктах\n3. Кортизол от стресса блокирует жиросжигание",
-        "proof": "Ирина, 38 лет — 2 года не могла сдвинуться с места.\nЗа 28 дней минус 7 кг. Оказалось — ела слишком мало.\n\nСергей, 33 года — тренировался 4 раза в неделю. Поменяли питание — минус 9 кг.",
-    },
-    "starter_stopper": {
-        "emoji": "🔁", "name": "Стартер-стопер",
-        "problem": "В начале мотивация огромная.\nНо через 10–14 дней она испаряется — и всё заново.\n\nПроблема не в Вас.\nПроблема в том, что Вы работаете на силе воли. А она конечна у всех.",
-        "cycle": "🔴 Что происходит у Вас:\n\n→ Мощный старт — мотивация на максимуме\n→ Через 1–2 недели энтузиазм падает\n→ Один пропуск → ощущение провала → бросаешь\n→ Через время — снова с понедельника",
-        "solution": "✅ Что реально помогает:\n\n→ Заменить мотивацию системой — она не исчезает\n→ Внешние точки контроля: куратор, группа\n→ Маленькие wins вместо большой далёкой цели\n\nКогда есть система и окружение — мотивация не нужна.",
-        "tools": "🛠 Что добавим в Вашем случае:\n\n1️⃣ Систему вместо силы воли — ежедневную структуру, которой легко следовать\n2️⃣ Внешнюю поддержку — куратор и группа, которые не дают выпасть\n3️⃣ Протокол срыва — чёткий алгоритм что делать, если пропустили, чтобы не бросить совсем",
-        "day3": "📌 Почему стартер-стопер останавливается на 2-й неделе:\n\n1. Мотивация эмоциональная — она быстро гаснет\n2. Нет системы на сложный день — один пропуск = провал\n3. Цель далеко — мозг не видит прогресса",
-        "proof": "Олег, 27 лет — начинал 6 раз за 2 года.\nВ потоке FitState впервые прошёл все 28 дней. Минус 8 кг.\n\nНастя, 31 год — группа и куратор сделали то, что сила воли не смогла за 3 года.",
-    },
+/* GRID */
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding:0 0 60px}
+.plan{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:28px 24px;display:flex;flex-direction:column;position:relative;transition:border-color .25s,transform .25s}
+.plan:hover{border-color:var(--border2);transform:translateY(-3px)}
+
+/* FEATURED plan */
+.plan.featured{background:var(--card2);border:1.5px solid var(--purpleL);transform:none}
+.plan.featured:hover{transform:translateY(-3px)}
+.featured-badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,var(--purple),var(--purpleL));color:#fff;font-size:11px;font-weight:800;padding:4px 18px;border-radius:100px;white-space:nowrap;letter-spacing:.04em}
+
+/* Plan header */
+.plan-icon{font-size:24px;margin-bottom:10px}
+.plan-name{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.price{font-size:32px;font-weight:900;color:var(--text)}
+.price-old{font-size:16px;color:var(--muted);text-decoration:line-through}
+.price-save{font-size:12px;font-weight:700;color:var(--green);background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.2);padding:2px 8px;border-radius:100px}
+.plan-tagline{font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px;line-height:1.3}
+.price-period{font-size:12px;color:var(--muted);margin-bottom:20px}
+
+/* Features */
+.features{list-style:none;display:flex;flex-direction:column;gap:10px;margin-bottom:24px;flex:1}
+.feat{display:flex;align-items:flex-start;gap:10px;font-size:14px;line-height:1.45}
+.feat.off{color:var(--muted);text-decoration:line-through;opacity:.45}
+.feat-icon{width:18px;height:18px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.feat-icon.on{background:rgba(74,222,128,.15)}
+.feat-icon.off-ic{background:rgba(255,255,255,.05)}
+.feat-check{width:9px;height:7px}
+.feat-x{width:8px;height:8px}
+
+/* CTA button */
+.plan-btn{display:block;width:100%;padding:14px;border-radius:100px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;border:none;text-align:center;text-decoration:none;transition:transform .18s,box-shadow .18s,opacity .18s}
+.plan-btn:hover{transform:translateY(-2px)}
+.plan-btn.default{background:rgba(255,255,255,.07);color:var(--text);border:1px solid var(--border2)}
+.plan-btn.default:hover{background:rgba(255,255,255,.12)}
+.plan-btn.accent{background:linear-gradient(135deg,var(--purple),var(--purpleL));color:#fff;box-shadow:0 4px 20px rgba(124,58,237,.35)}
+.plan-btn.accent:hover{box-shadow:0 8px 28px rgba(124,58,237,.55)}
+
+/* COMPARE TABLE */
+.compare{padding:0 0 60px}
+.compare h2{font-size:clamp(20px,3vw,32px);font-weight:800;text-align:center;margin-bottom:32px}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+thead th{padding:14px 16px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border2)}
+thead th:first-child{text-align:left;color:var(--muted)}
+thead th:not(:first-child){text-align:center;min-width:120px}
+thead th.th-feat{color:var(--purpleXL);position:relative}
+thead th.th-feat::after{content:'';position:absolute;inset:0;background:rgba(124,58,237,.07);border-radius:8px 8px 0 0;pointer-events:none}
+tbody tr{border-bottom:1px solid var(--border)}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,.02)}
+td{padding:12px 16px}
+td:first-child{color:var(--mutedL);font-size:13px}
+td:not(:first-child){text-align:center}
+td.td-feat{background:rgba(124,58,237,.04)}
+.check-y{color:var(--green);font-size:16px}
+.check-n{color:rgba(255,255,255,.2);font-size:16px}
+.check-partial{font-size:12px;color:var(--amber);font-weight:600}
+
+/* GUARANTEE */
+.guarantee{max-width:640px;margin:0 auto 60px;background:rgba(74,222,128,.06);border:1px solid rgba(74,222,128,.18);border-radius:var(--r);padding:24px 28px;text-align:center}
+.guarantee h3{font-size:18px;font-weight:700;margin-bottom:8px}
+.guarantee p{font-size:14px;color:var(--muted);line-height:1.7}
+
+/* FAQ */
+.faq{max-width:640px;margin:0 auto 60px}
+.faq h2{font-size:clamp(20px,3vw,28px);font-weight:800;margin-bottom:24px;text-align:center}
+.faq-item{border:1px solid var(--border);border-radius:var(--rsm);margin-bottom:8px;overflow:hidden}
+.faq-q{padding:16px 20px;font-size:14px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.faq-q:hover{background:rgba(255,255,255,.03)}
+.faq-q span{color:var(--muted);font-size:18px;transition:transform .2s}
+.faq-item.open .faq-q span{transform:rotate(45deg)}
+.faq-a{display:none;padding:0 20px 16px;font-size:13px;color:var(--muted);line-height:1.7}
+.faq-item.open .faq-a{display:block}
+
+/* FOOTER */
+footer{padding:28px 0;border-top:1px solid var(--border);text-align:center}
+.fl{font-size:16px;font-weight:900;background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+footer p{font-size:12px;color:var(--muted)}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--text)}
+
+@media(max-width:900px){
+  .plans{grid-template-columns:1fr}
+  .plan.featured{transform:none}
+  nav{padding:14px 16px}
+}
+</style>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://pp-reality.ru/pay.html">
+  <meta property="og:title" content="Выберите тариф — Реалити #ПП «Программа Преображения»">
+  <meta property="og:description" content="Базовый от 5 300 ₽, Расширенный от 7 900 ₽, Личный от 21 200 ₽. Старт 23 июня.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/Vezuncheg/fitstate/main/images/ivan_photo.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="description" content="Базовый от 5 300 ₽, Расширенный от 7 900 ₽, Личный от 21 200 ₽. Старт 23 июня.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Выберите тариф — Реалити #ПП «Программа Преображения»">
+  <meta name="twitter:description" content="Базовый от 5 300 ₽, Расширенный от 7 900 ₽, Личный от 21 200 ₽. Старт 23 июня.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/Vezuncheg/fitstate/main/images/ivan_photo.jpg">
+</head>
+<body>
+
+<nav>
+  <div class="logo">Реалити #ПП</div>
+  <a href="index-main.html" class="nav-back">← На главную страницу</a>
+</nav>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-badge" id="heroBadge">🎯 Выберите тариф и начните уже сегодня</div>
+    <h1>Выберите <span class="grad">свой тариф</span></h1>
+    <p class="hero-sub" id="heroSub">8 недель программы Реалити #ПП «Программа Преображения» — персональный план под Ваш тип, закрытый канал и реальный результат</p>
+    <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);color:#c4b5fd;padding:10px 24px;border-radius:100px;font-size:14px;font-weight:700;margin-bottom:12px;">
+      🗓 Старт следующего потока: <strong style="color:#fff;">23 июня 2026</strong>
+    </div>
+
+    <!-- Promo banner (показывается только со скидкой) -->
+    <div class="promo-banner" id="promoBanner">
+      <p>&#9889; <strong>Специальное предложение истекает через 1 час!</strong><br>Специальная цена активна — выберите тариф прямо сейчас:</p>
+      <div class="timer-row">
+        <div class="timer-block"><span id="tMin">59</span><span class="timer-label">МИН</span></div>
+        <span class="timer-sep">:</span>
+        <div class="timer-block"><span id="tSec">59</span><span class="timer-label">СЕК</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="plans" id="plansGrid">
+
+      <!-- БАЗОВЫЙ -->
+      <div class="plan" id="plan0">
+        <div class="plan-icon">⚡</div>
+        <div class="plan-name">Базовый</div>
+        <div class="plan-tagline">Стартовый пинок</div>
+        <div class="price-row">
+          <span class="price" id="p0">5 300 ₽</span>
+          <span class="price-old" id="p0old" style="display:none">5 300 ₽</span>
+        </div>
+        <div class="price-save" id="p0save" style="display:none">Специальная цена</div>
+        <div class="price-period">разовый платёж · 8 недель</div>
+        <ul class="features">
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Доступ в реалити на 8 недель</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Закрытый канал в Telegram</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Персональный план под Ваш тип</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Чат участников</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Обратная связь от куратора</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Еженедельные видеоконференции</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Приложение «Ассистент Состояния»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Планер «Состояние»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Книга «Состояние»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Индивидуальный созвон с Иваном</li>
+        </ul>
+        <a href="#" class="plan-btn default" id="btn0" onclick="openModal('Стартовый пинок', 'btn0'); return false">Выбрать базовый</a>
+      </div>
+
+      <!-- РАСШИРЕННЫЙ (featured) -->
+      <div class="plan featured" id="plan1">
+        <div class="featured-badge">⭐ Рекомендуем</div>
+        <div class="plan-icon">💎</div>
+        <div class="plan-name">Расширенный</div>
+        <div class="plan-tagline">Полное погружение</div>
+        <div class="price-row">
+          <span class="price" id="p1">7 900 ₽</span>
+          <span class="price-old" id="p1old" style="display:none">7 900 ₽</span>
+        </div>
+        <div class="price-save" id="p1save" style="display:none">Специальная цена</div>
+        <div class="price-period">разовый платёж · 8 недель</div>
+        <ul class="features">
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Доступ в реалити на 8 недель</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Закрытый канал в Telegram</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Персональный план под Ваш тип</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Чат участников</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Ежедневная обратная связь от куратора</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Еженедельные видеоконференции с Иваном</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Приложение «Ассистент Состояния»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Планер «Состояние»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Книга «Состояние»</li>
+          <li class="feat off"><div class="feat-icon off-ic"><svg class="feat-x" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="#555" stroke-width="1.5" stroke-linecap="round"/></svg></div>Индивидуальный созвон с Иваном</li>
+        </ul>
+        <a href="#" class="plan-btn accent" id="btn1" onclick="openModal('Полное погружение', 'btn1'); return false">Выбрать расширенный →</a>
+      </div>
+
+      <!-- ЛИЧНЫЙ -->
+      <div class="plan" id="plan2">
+        <div class="plan-icon">👑</div>
+        <div class="plan-name">Личный</div>
+        <div class="plan-tagline">Иван лично со мной</div>
+        <div class="price-row">
+          <span class="price" id="p2">21 200 ₽</span>
+          <span class="price-old" id="p2old" style="display:none">21 200 ₽</span>
+        </div>
+        <div class="price-save" id="p2save" style="display:none">Специальная цена</div>
+        <div class="price-period">разовый платёж · 8 недель</div>
+        <ul class="features">
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Доступ в реалити на 8 недель</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Закрытый канал в Telegram</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Персональный план под Ваш тип</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Чат участников</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Ежедневная обратная связь от куратора</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Еженедельные видеоконференции с Иваном</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Приложение «Ассистент Состояния»</li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Планер «Состояние» <span style="font-size:11px;color:var(--amber)">с автографом Ивана</span></li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>Книга «Состояние» <span style="font-size:11px;color:var(--amber)">с автографом Ивана</span></li>
+          <li class="feat"><div class="feat-icon on"><svg class="feat-check" viewBox="0 0 9 7" fill="none"><path d="M1 3.5l2.5 2.5 4.5-5" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><span>Индивидуальный созвон с Иваном <span style="font-size:11px;color:var(--amber);">★ первые 20 чел.</span></span></li>
+        </ul>
+        <a href="#" class="plan-btn default" id="btn2" onclick="openModal('Иван лично со мной', 'btn2'); return false">Выбрать личный</a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- GUARANTEE -->
+<section>
+  <div class="wrap">
+    <div class="guarantee">
+      <h3>✅ Гарантия результата</h3>
+      <p>Если после 8 недель Вы не увидите результата — мы вернём деньги. Без вопросов. Мы уверены в программе, потому что она работает уже 24 года.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section>
+  <div class="wrap">
+    <div class="faq">
+      <h2>Частые вопросы</h2>
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">Когда начинается поток? <span>+</span></div>
+        <div class="faq-a">Ближайший поток стартует <strong>23 июня 2026</strong>. Реалити длится <strong>28 дней</strong>. После этого участники 2-го и 3-го тарифов переходят в закрытый клуб поддержки на 1 месяц. После оплаты Вы получите ссылку на закрытый канал и подготовительные материалы для подготовки к старту.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">Чем отличается Расширенный от Базового? <span>+</span></div>
+        <div class="faq-a">В Расширенном тарифе Вы получаете живую обратную связь от куратора каждый день, чат с другими участниками, еженедельные видеоконференции с Иваном и приложение-ассистент. Это не просто контент — это полное сопровождение.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">Что такое приложение «Ассистент Состояния»? <span>+</span></div>
+        <div class="faq-a">Это наша собственная разработка — цифровой помощник, созданный специально под методику FitState. Ассистент помогает лучше понять, что с Вами происходит прямо сейчас: снизить внутреннее напряжение, вернуть фокус и найти опору в моменты, когда сложно. Доступен 24/7 и знает Ваш тип и цели.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">Как происходит оплата? <span>+</span></div>
+        <div class="faq-a">Оплата производится в полном объёме до начала реалити. После подтверждения оплаты Вы получаете ссылку на закрытый Telegram-канал потока и доступ ко всем материалам выбранного тарифа.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="toggleFaq(this)">Специальная цена — для всех? <span>+</span></div>
+        <div class="faq-a">Специальная цена действует только для тех, кто пришёл из Telegram-бота в течение 1 часа после получения персонального результата теста. После истечения таймера действуют стандартные цены.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="fl">Реалити #ПП</div>
+    <p>© 2026 Реалити #ПП «Программа Преображения» · <a href="privacy.html" style="color:var(--muted);text-decoration:none">Политика конфиденциальности</a> · <a href="offer.html" style="color:var(--muted);text-decoration:none">Договор оферты</a><a href="https://vezuncheg.github.io/fitstate">Пройти тест</a></p>
+  </div>
+</footer>
+
+<script>
+// ── ЦЕНЫ ──
+var PRICES = {
+  base:     { normal: 5300,  sale: 4600  },
+  extended: { normal: 7900,  sale: 6900  },
+  personal: { normal: 21200, sale: 18500 },
+};
+
+// ── Форматирование ──
+function fmt(n) {
+  return n.toLocaleString('ru-RU') + ' ₽';
 }
 
-
-def calc(weight, height, goal):
-    bmi = round(weight / ((height / 100) ** 2), 1)
-    if goal == "fat":
-        # Реалистичные показатели за 28 дней
-        lo, hi = (4, 6) if bmi > 30 else (3, 5) if bmi > 25 else (2, 4)
-        wlo, whi = round(weight - hi), round(weight - lo)
-        bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
-        return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
-                    ch=f"−{lo}–{hi} кг жира",
-                    muscle="+0.5–1 кг мышц при правильном балансе БЖУ",
-                    b2=bmi2,
-                    waist=f"минус {lo}–{hi} см в талии",
-                    en="заметно вырастет к 3-й неделе")
-    elif goal == "muscle":
-        return dict(cw=weight, cb=bmi,
-                    wr=f"{round(weight+1)}–{round(weight+2)} кг",
-                    ch="+1–2 кг мышечной массы",
-                    muscle="жировая прослойка снизится на 0.5–1%",
-                    b2=round(bmi+0.3, 1),
-                    waist="больше мышц, рельеф",
-                    en="вырастет к 2-й неделе")
-    else:
-        wlo, whi = round(weight - 3), round(weight - 2)
-        bmi2 = round((wlo + whi) / 2 / ((height / 100) ** 2), 1)
-        return dict(cw=weight, cb=bmi, wr=f"{wlo}–{whi} кг",
-                    ch="−2–3 кг + рельеф и тонус",
-                    muscle="+0.5–1.5 кг мышечного тонуса",
-                    b2=bmi2,
-                    waist="минус 2–4 см, заметный рельеф",
-                    en="вырастет уже к концу 1-й недели")
-
-
-def visual(f, name):
-    return (
-        f"🖼 *ТЫ СЕЙЧАС*\n"
-        f"Вес: {f['cw']} кг\n"
-        f"_{name}_\n\n"
-        f"⬇️ Реалити #ПП «Программа Преображения» 28 дней ⬇️\n\n"
-        f"🖼 *ТЫ ЧЕРЕЗ 28 ДНЕЙ*\n"
-        f"Вес: {f['wr']}\n"
-        f"*{f['ch']}*\n"
-        f"*{f['muscle']}*\n\n"
-        f"→ Объём: {f['waist']}\n"
-        f"→ Энергия: {f['en']}\n\n"
-        f"_На основе Ваших параметров и средних результатов участников с похожим профилем._"
-    )
-
-
-def pay_kb():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Записаться →", url=PAYMENT_URL)]])
-
-
-def more_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
-        [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
-        [InlineKeyboardButton("✅ Кому подходит, а кому нет?", callback_data="start_b3")],
-        [InlineKeyboardButton("Записаться →", url=PAY_URL)],
-    ])
-
-
-async def send_photo_url(bot, chat_id, url, caption=None):
-    """Скачивает фото и отправляет как файл. 3 попытки при ошибке."""
-    import io
-    for attempt in range(3):
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.get(url, follow_redirects=True)
-                r.raise_for_status()
-            bio = io.BytesIO(r.content)
-            bio.name = url.split("/")[-1]
-            if caption:
-                await bot.send_photo(chat_id=chat_id, photo=bio, caption=caption)
-            else:
-                await bot.send_photo(chat_id=chat_id, photo=bio)
-            return  # успех — выходим
-        except Exception as e:
-            logger.warning(f"Попытка {attempt+1}/3 не удалась для {url}: {e}")
-            if attempt < 2:
-                await asyncio.sleep(3)  # пауза перед повтором
-    # Все 3 попытки провалились
-    logger.error(f"Не удалось отправить фото {url} после 3 попыток")
-    await bot.send_message(chat_id=chat_id, text="📸 [фото временно недоступно]")
-
-
-async def send_media_group_urls(bot, chat_id, urls):
-    """Скачивает фото параллельно, конвертирует PNG→JPEG и отправляет медиагруппой."""
-    import io
-    import asyncio as _asyncio
-    from PIL import Image
-
-    async def fetch(url):
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.get(url, follow_redirects=True)
-                r.raise_for_status()
-            data = r.content
-            # Конвертируем PNG в JPEG чтобы Telegram не падал на image_process_failed
-            if url.lower().endswith('.png'):
-                img = Image.open(io.BytesIO(data)).convert('RGB')
-                buf = io.BytesIO()
-                img.save(buf, format='JPEG', quality=92)
-                buf.seek(0)
-                buf.name = url.split("/")[-1].replace('.png', '.jpg')
-                return buf
-            else:
-                bio = io.BytesIO(data)
-                bio.name = url.split("/")[-1]
-                return bio
-        except Exception as e:
-            logger.error(f"Не удалось скачать фото {url}: {e}")
-            return None
-
-    bios = await _asyncio.gather(*[fetch(u) for u in urls])
-    valid_bios = [bio for bio in bios if bio is not None]
-
-    if not valid_bios:
-        logger.error("Все фото в медиагруппе недоступны")
-        return
-
-    # Пробуем отправить медиагруппой
-    try:
-        media = [InputMediaPhoto(media=bio) for bio in valid_bios]
-        await bot.send_media_group(
-            chat_id=chat_id, media=media,
-            write_timeout=120, read_timeout=120, connect_timeout=60
-        )
-    except Exception as e:
-        logger.error(f"Медиагруппа не отправилась ({e}), отправляем по одному")
-        # Fallback — отправляем каждое фото отдельно
-        for bio in valid_bios:
-            try:
-                bio.seek(0)
-                await bot.send_photo(chat_id=chat_id, photo=bio,
-                    write_timeout=60, read_timeout=60)
-                await asyncio.sleep(1)
-            except Exception as e2:
-                logger.error(f"Фото не отправилось: {e2}")
-
-
-async def schedule_dojim(uid, context):
-    jq = context.application.job_queue
-    if not jq:
-        return
-
-    # ── Через 1 час: таймер истёк, предлагаем 3 раздела ──
-    async def d1h(ctx):
-        if is_paid(uid):
-            logger.info(f"uid={uid} уже оплатил — d1h пропущен")
-            return
-        await ctx.bot.send_message(
-            uid,
-            "Прежде чем примите решение, хочу рассказать Вам больше о том, что стоит за Реалити #ПП.\n\n"
-            "Выберите, с чего начать 👇",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
-                [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
-                [InlineKeyboardButton("✅ Кому подходит реалити, а кому нет?", callback_data="start_b3")],
-                [InlineKeyboardButton("Записаться →", url=f"{PAY_URL}?tg_id={uid}")],
-            ])
-        )
-        # Помечаем как выполненный — при следующем деплое не будет восстанавливаться
-        try:
-            from db import funnel_mark_block as _mark_d1h
-            _mark_d1h(uid, "d1h")
-        except Exception as e:
-            logger.error(f"funnel_mark_block d1h error: {e}")
-
-    # ── Блок 1: Об Иване (день 1) ──
-    async def block1(ctx):
-        if is_paid(uid):
-            logger.info(f"uid={uid} уже оплатил — блок 1 пропущен")
-            return
-
-        # Вступление от команды
-        await ctx.bot.send_message(uid,
-            "*Кто такой Иван Самохин?*\n"
-            "Создатель Реалити #ПП «Программа Преображения» 👇\n\n"
-            "Вы знаете его как создателя и ведущего подкаста «Состояние» "
-            "со 155 000 подписчиков на YouTube и 65+ миллионами просмотров "
-            "на интервью с врачами, психологами, тренерами и политологами.\n\n"
-            "Но сейчас Вы узнаете про его путь в преображении тела и поддержании "
-            "хорошей формы на протяжении 24 лет. Иван расскажет свою историю 👇",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Часть 1 — детство, генетика, привычки
-        await ctx.bot.send_message(uid,
-            "*НАЧАЛО*\n\n"
-            "В детстве я был слабым ребёнком — постоянно болел, плохой иммунитет. "
-            "Таких сейчас называют астеник. Можно уверенно сказать, что я был дрыщом в 14 лет.\n\n"
-            "*«У тебя просто генетика» — самый вредный миф*\n\n"
-            "Когда люди видят мой результат сегодня, говорят: «Ну у тебя гены». "
-            "Они не видели меня в 14 лет — худого, слабого, с плохим иммунитетом. "
-            "Я начал качаться под впечатлением от Сталлоне и Шварценеггера, как и многие из вас.\n\n"
-            "Важна не генетика, а привычки. За последние три месяца я не пропустил ни одной "
-            "из трёх тренировок в неделю. Не потому что я сверхчеловек. А потому что это стало "
-            "такой же автоматикой, как чистить зубы.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Фото 1 — коллаж по годам
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_years.jpeg")
-        await asyncio.sleep(20)
-
-        # Часть 3 — почему не тренер (жирный заголовок)
-        await ctx.bot.send_message(uid,
-            "*Почему я не тренер (и почему это вам выгодно)*\n\n"
-            "За 24 года я перепробовал сотни тренеров в разных странах. И знаете что?\n\n"
-            "Большинство из них:\n"
-            "→ Рано или поздно предлагают анаболики (им нужен быстрый кейс, а не ваше здоровье)\n"
-            "→ Живут в зале по 12 часов, питаются из контейнеров, не выходят в рестораны\n"
-            "→ Видят только вес и процент жира, забывая про кожу, волосы, ментальное состояние\n\n"
-            "Я не тренер и не врач. Я практик с 24-летним стажем, который провёл 60+ интервью "
-            "с учёными, генетиками и эндокринологами. Я не рассказываю теорию — я применяю всё на себе.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Фото — книги и канал медиагруппой
-        await send_media_group_urls(ctx.bot, uid, [
-            f"{PHOTOS_URL}/book_sostoyanie.jpeg",
-            f"{PHOTOS_URL}/book_sostoyanie2.jpeg",
-            f"{PHOTOS_URL}/youtube_channel.jpeg",
-        ])
-        await asyncio.sleep(20)
-
-        # Часть 4 — почему тренировки не работают
-        await ctx.bot.send_message(uid,
-            "*Почему ваши тренировки не работают (и что делать вместо этого)*\n\n"
-            "Вы знаете это чувство: купили абонемент, пошли три недели, потом работа, "
-            "командировка, «всё потом нагоню». Или сели на марафон — отказались от всего, "
-            "тренировались как сумасшедшие, а через месяц вернулись к жизни с лишними тремя "
-            "килограммами и чувством вины.\n\n"
-            "Я проходил это. Ломал ногу, пропадал на месяцы, работал допоздна. И каждый раз "
-            "возвращался к форме не благодаря «железной воле», а благодаря системе, которая "
-            "работает даже когда жизнь летит к чертям.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Часть 5 — система против марафонов
-        await ctx.bot.send_message(uid,
-            "*Система против марафонов*\n\n"
-            "Марафон по природе вырывает вас из жизни: резкие запреты, режим, отказ от семьи "
-            "и работы. Потом — обязательный откат.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Часть 6 — мой подход другой
-        await ctx.bot.send_message(uid,
-            "*Мой подход другой.*\n\n"
-            "Я работаю каждый день в своём бизнесе, ем в ресторанах, бывает и фастфуд, "
-            "перелёты, дедлайны. И при этом уже 24 года держу форму.\n\n"
-            "Секрет не в отказах, а в пропорциях. Как в хорошем супе — важно соотношение "
-            "ингредиентов, а не голодовка.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-
-        # Фото — результаты 28 дней (новое фото с реальными цифрами)
-        # Часть 7 — реальные цифры
-        await ctx.bot.send_message(uid,
-            "*Реальные цифры (снято на камеру)*\n\n"
-            "Перед запуском я прошёл программу сам. С нуля, зафиксировав всё:\n\n"
-            "За 28 дней:\n"
-            "→ −4,3 кг общего веса\n"
-            "→ −2,2 кг жировой массы\n"
-            "→ −1,8% телесного жира\n\n"
-            "При этом я не сидел на воде и огурцах. Ходил в рестораны, работал, жил нормальной жизнью.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(20)
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
-        await asyncio.sleep(20)
-
-        # Часть 8 — что вы получите + закрывающий CTA
-        await ctx.bot.send_message(uid,
-            "*Что вы получите*\n\n"
-            "Это не очередной «стань качком за месяц» с фейковыми фото. Это система привычек, которая:\n\n"
-            "→ Работает в условиях перегрузов и командировок\n"
-            "→ Не требует жить в зале и носить еду в контейнерах\n"
-            "→ Учитывает ваше ментальное и физическое здоровье как единое целое\n"
-            "→ Остаётся с вами навсегда, а не на 28 дней\n\n"
-            "*Старт программы: 23 июня.*\n\n"
-            "Места ограничены — я работаю с небольшими группами, чтобы отслеживать результат каждого.\n\n"
-            "Если вы устали от тренеров-зомби и марафонов, которые ведут к откату — "
-            "*пришло время для системы, которая работает в реальной жизни.\n"
-            "Если Вы чувствуете, что это то, что Вам нужно — не откладывайте.*",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
-            ])
-        )
-
-        # Помечаем b1 как выполненный
-        try:
-            from db import funnel_mark_block as _mark_b1
-            _mark_b1(uid, "b1")
-        except Exception as e:
-            logger.error(f"funnel_mark_block b1 error: {e}")
-        # Запускаем следующий непросмотренный блок
-        await schedule_next_unseen(uid, "b1", ctx)
-
-    # ── Блок 2: Подробно о продукте (день 2) ──
-    async def block2(ctx):
-        if is_paid(uid):
-            logger.info(f"uid={uid} уже оплатил — блок 2 пропущен")
-            return
-
-        # Вступление
-        await ctx.bot.send_message(uid,
-            "☄️ Почему Вы не худеете — и это точно не лень\n\n"
-            "Иван записал урок, который отвечает на главный вопрос: "
-            "почему Вы уже 100 раз начинали, срывались, а вес возвращался."
-        )
-        await asyncio.sleep(20)
-
-        # Что внутри урока
-        await ctx.bot.send_message(uid,
-            "Что внутри:\n\n"
-            "• Почему дело часто не в «силе воли»\n"
-            "• Как худеть без голода и без «есть на 1200»\n"
-            "• Примеры питания на 1500 / 2000 / 2500 / 3000 ккал\n"
-            "• Как вписывать «запрещёнку» — бургер, пиво, шаурму, сладкое, десерты — без чувства вины\n\n"
-            "После просмотра Вы:\n\n"
-            "• Поймёте, почему раньше не получалось\n"
-            "• Увидите, какие шаги реально дают результат\n"
-            "• Перестанете ломать себя и начнёте действовать по системе"
-        )
-        await asyncio.sleep(20)
-
-        # Ссылка на урок + призыв
-        await ctx.bot.send_message(uid,
-            "Смотрите урок по ссылке:\n"
-            "👉 https://kinescope.io/hubcbT4t5vnaLVYPC6UjAK\n\n"
-            "─────────────────\n\n"
-            "А всё, о чём говорится в уроке — это основа Реалити #ПП. "
-            "Только не в формате видео, а в формате живого процесса рядом с Иваном и куратором. "
-            "28 дней, каждый день, с Вашим типом и Вашей целью.\n\n"
-            "Старт *23 июня*. Если урок откликнулся — самое время сделать следующий шаг.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
-            ])
-        )
-
-        # Запускаем block3 через 1 минуту после последнего сообщения
-        jq = ctx.application.job_queue
-        if jq:
-            jq.run_once(block3, 60, name=f"b3_{uid}")
-
-    # ── Блок 3: Кому подойдёт, а кому нет (день 3) ──
-    async def block3(ctx):
-        if is_paid(uid):
-            logger.info(f"uid={uid} уже оплатил — блок 3 пропущен")
-            return
-
-        # Сообщение 1 — вступление + кому НЕ подойдёт + кому подойдёт (всё вместе)
-        await ctx.bot.send_message(uid,
-            "Хотим быть с Вами честными.\n\n"
-            "Реалити #ПП подходит не всем — и это важно понять до того, как принимать решение. "
-            "Прочитайте внимательно: это сэкономит Вам время и деньги, "
-            "если программа действительно не для Вас. "
-            "И укрепит уверенность — если Вы узнаёте себя в первом списке.\n\n"
-            "🚫 Реалити не для Вас, если:\n\n"
-            "❌ Вы ищете жёсткую диету с полным списком запретов — "
-            "здесь нет запрещённых продуктов, только понимание пропорций\n\n"
-            "❌ Вы хотите «минус 10 кг за неделю» — "
-            "таких результатов не бывает без вреда для здоровья, "
-            "и мы их не обещаем\n\n"
-            "❌ Вы ждёте волшебную таблетку — "
-            "здесь нужно участвовать, смотреть, применять. "
-            "Пассивное наблюдение результата не даст\n\n"
-            "✅ Реалити создано для Вас, если:\n\n"
-            "✔ У Вас нет времени на сложные многочасовые программы — "
-            "Вы живёте в режиме обычного человека: работа, семья, дела\n\n"
-            "✔ Вы устали и в стрессе — и хотите наконец выстроить режим, "
-            "не ломая себя и не отказываясь от жизни\n\n"
-            "✔ Вы уже проходили через срывы и качели веса — "
-            "начинали, бросали, снова начинали. И хотите выбраться из этого круга\n\n"
-            "✔ Вы хотите форму без фанатизма — без лотков с едой, "
-            "без двенадцати часов в зале, без ощущения, что жизнь проходит мимо\n\n"
-            "✔ Вы хотите результат, который вписывается в обычную жизнь — "
-            "с ресторанами, фастфудом, командировками и выходными"
-        )
-        await asyncio.sleep(20)
-
-        # Сообщение 2 — что почувствуете + Иван прошёл + фото + CTA
-        await ctx.bot.send_message(uid,
-            "Что Вы почувствуете через 28 дней:\n\n"
-            "✔ Снижение веса и объёмов — без голода и срывов\n"
-            "✔ Больше энергии — уже к концу первой недели\n"
-            "✔ Меньше тяги к вредной еде — потому что она перестаёт быть запретной\n"
-            "✔ Уверенность в своём теле — Вы снова начинаете его понимать\n"
-            "✔ Ощущение контроля — над едой, активностью, своим днём\n"
-            "✔ Привычки, которые остаются с Вами — не временный марш-бросок, "
-            "а новый способ жить\n\n"
-            "Я уже прошёл этот путь.\n\n"
-            "Эти 28 дней — не теория и не план. "
-            "Это реальный процесс, который я прошёл сам и записал день за днём. "
-            "Специально для того, чтобы Вам было легче пройти его сейчас.\n\n"
-            "Никакого монтажа в стиле «до/после». "
-            "Всё как есть, каждый день — питание, тренировки, усталость, обычная жизнь. "
-            "Без фильтров и идеальных условий."
-        )
-        await asyncio.sleep(20)
-
-        # Фото — до/после 28 дней
-        await send_photo_url(ctx.bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
-        await asyncio.sleep(20)
-
-        # Закрывающий продающий текст + кнопка
-        await ctx.bot.send_message(uid,
-            "За 28 дней:\n"
-            "→ −4,3 кг веса\n"
-            "→ −2,2 кг жировой массы\n"
-            "→ −1,8% телесного жира\n\n"
-            "Без анаболиков. Без жёстких ограничений. В условиях обычной жизни.\n\n"
-            "─────────────────\n\n"
-            "Вы прочитали три блока. Вы знаете, кто Иван и почему ему можно доверять. "
-            "Вы знаете, что внутри продукта. Вы знаете, для кого это.\n\n"
-            "Если Вы узнали себя в списке тех, кому это подойдёт — "
-            "не нужно больше думать и откладывать. "
-            "Каждый день ожидания — это ещё один день в том же круге.\n\n"
-            "*Старт 23 июня. Места ограничены.*\n\n"
-            "Сделайте шаг прямо сейчас — пока есть возможность.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔥 Записаться в Реалити →", url=PAY_URL)]
-            ])
-        )
-
-        # Запускаем final через 1 минуту после последнего сообщения
-        jq = ctx.application.job_queue
-        if jq:
-            jq.run_once(final, 60, name=f"fin_{uid}")
-
-    # ── Финальный дожим (день 5) ──
-    async def final(ctx):
-        if is_paid(uid):
-            logger.info(f"uid={uid} уже оплатил — финал пропущен")
-            return
-        await ctx.bot.send_message(
-            uid,
-            "*Реалити уже скоро!*",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]
-            ])
-        )
-
-    # ── ТАЙМИНГИ ──
-    from datetime import timedelta
-    now = datetime.now()
-    d1h_at = now + timedelta(seconds=3600)
-    b1_at  = now + timedelta(seconds=86400)
-
-    # Сохраняем воронку в БД — восстановится после деплоя
-    try:
-        from db import funnel_start as _funnel_start
-        _funnel_start(uid, d1h_at, b1_at)
-    except Exception as e:
-        logger.error(f"funnel_start DB error: {e}")
-
-    jq.run_once(d1h,    3600,  name=f"d1h_{uid}")   # 1 час после оффера
-    jq.run_once(block1, 86400, name=f"b1_{uid}")    # 1 сутки после оффера
-    # block2, block3, final запускаются цепочкой внутри каждого блока
-
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Парсим start параметр: архетип|utm_source|utm_medium|utm_campaign
-    raw_start = (context.args or [None])[0]
-    utm_source = utm_medium = utm_campaign = None
-    if raw_start and '__' in raw_start:
-        parts = raw_start.split('__')
-        arch_key = parts[0]
-        utm_source   = parts[1] if len(parts) > 1 and parts[1] else None
-        utm_medium   = parts[2] if len(parts) > 2 and parts[2] else None
-        utm_campaign = parts[3] if len(parts) > 3 and parts[3] else None
-    else:
-        arch_key = raw_start
-    arch = ARCHETYPES.get(arch_key)
-    context.user_data["arch_key"] = arch_key
-    context.user_data["utm_source"] = utm_source
-    context.user_data["utm_medium"] = utm_medium
-    context.user_data["utm_campaign"] = utm_campaign
-
-    # Логируем пользователя и событие
-    uid = update.effective_user.id
-    try:
-        from db import user_upsert as _upsert, log_event as _log
-        _upsert(uid,
-                username=update.effective_user.username,
-                full_name=update.effective_user.full_name)
-        _log(uid, "start", arch_key or "direct")
-        if arch_key:
-            from db import user_update_profile as _profile
-            _profile(uid, archetype=arch_key,
-                     utm_source=context.user_data.get("utm_source"),
-                     utm_medium=context.user_data.get("utm_medium"),
-                     utm_campaign=context.user_data.get("utm_campaign"))
-    except Exception as e:
-        logger.error(f"analytics start error: {e}")
-
-    if not arch:
-        await update.message.reply_text(
-            "Привет! 👋\nПройдите тест и получи разбор:\n\n"
-            "👉 " + QUIZ_URL)
-        return ConversationHandler.END
-
-    context.user_data["in_quiz"] = True  # начало анкеты — блокируем пересылку в поддержку
-    await update.message.reply_text("Привет! 👋\n\nПолучил Ваши ответы. Даю разбор — 1 минута.")
-    await asyncio.sleep(1.2)
-    await update.message.reply_text(f"*{arch['emoji']} Ваш тип: {arch['name']}*\n\n{arch['problem']}", parse_mode="Markdown")
-    await asyncio.sleep(1.2)
-    await update.message.reply_text(arch["cycle"])
-    await asyncio.sleep(1.2)
-    await update.message.reply_text(arch["solution"])
-    await update.message.reply_text(
-        "Хотите узнать — *каким Вы можете стать за 28 дней?*\n\nЕсли внедрить одну простую систему.\nЯ задам всего пару вопросов.",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Да, хочу узнать →", callback_data="go")],
-            [InlineKeyboardButton("Может позже", callback_data="later")],
-        ]))
-    return ASK_GENDER
-
-
-async def cb_later(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    context.user_data["in_quiz"] = False  # пользователь отказался — снимаем блок
-    await update.callback_query.message.reply_text("Хорошо! Когда будете готовы — /start\nМеню: /menu")
-    return ConversationHandler.END
-
-
-async def cb_go(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text(
-        "Отлично! Отвечайте как есть.\n\n*Ты мужчина или женщина?*",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("Мужчина", callback_data="gm"),
-            InlineKeyboardButton("Женщина", callback_data="gf"),
-        ]]))
-    return ASK_GENDER
-
-
-async def cb_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    context.user_data["gender"] = "male" if update.callback_query.data == "gm" else "female"
-    await update.callback_query.message.reply_text("*Сколько Вам лет?*\n\nНапишите число:", parse_mode="Markdown")
-    return ASK_AGE
-
-
-async def got_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        age = int(update.message.text.strip())
-        assert 10 <= age <= 100
-        context.user_data["age"] = age
-        await update.message.reply_text("*Текущий вес в кг?*\n\nНапример: 84", parse_mode="Markdown")
-        return ASK_WEIGHT
-    except:
-        await update.message.reply_text("Напишите число, например: 28")
-        return ASK_AGE
-
-
-async def got_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        w = float(update.message.text.strip().replace(",", "."))
-        assert 30 <= w <= 300
-        context.user_data["weight"] = w
-        await update.message.reply_text("*Рост в см?*\n\nНапример: 178", parse_mode="Markdown")
-        return ASK_HEIGHT
-    except:
-        await update.message.reply_text("Напишите вес, например: 84")
-        return ASK_WEIGHT
-
-
-async def got_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        h = float(update.message.text.strip().replace(",", "."))
-        assert 100 <= h <= 250
-        context.user_data["height"] = h
-        await update.message.reply_text(
-            "*Какой результат важнее всего?*", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Убрать лишний жир", callback_data="gl_fat")],
-                [InlineKeyboardButton("Набрать мышечную массу", callback_data="gl_muscle")],
-                [InlineKeyboardButton("Улучшить форму и рельеф", callback_data="gl_tone")],
-                [InlineKeyboardButton("Стать здоровее и энергичнее", callback_data="gl_health")],
-            ]))
-        return ASK_GOAL
-    except:
-        await update.message.reply_text("Напишите рост в см, например: 178")
-        return ASK_HEIGHT
-
-
-async def got_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    gmap = {"gl_fat": "fat", "gl_muscle": "muscle", "gl_tone": "tone", "gl_health": "tone"}
-    goal = gmap.get(update.callback_query.data, "fat")
-    context.user_data["goal"] = goal
-
-    w = context.user_data["weight"]
-    h = context.user_data["height"]
-    arch_key = context.user_data.get("arch_key", "emotional_eater")
-    arch = ARCHETYPES.get(arch_key, ARCHETYPES["emotional_eater"])
-
-    await update.callback_query.message.reply_text("Считаю Ваш результат... ⏳")
-
-    f = calc(w, h, goal)
-    context.user_data["forecast"] = f
-
-    await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
-    await asyncio.sleep(30)  # пауза 30 секунд перед следующим сообщением
-    await update.callback_query.message.reply_text(arch["tools"])
-    await asyncio.sleep(1.5)
-
-    uid = update.callback_query.from_user.id
-    await update.callback_query.message.reply_text(
-        "🎯 *Хотите достичь этого результата вместе с нами в группе?*\n\n"
-        "Я запустил онлайн программу, в которой вы:\n"
-        "— Похудеете и приведёте тело в форму 🔥\n"
-        "— Получите ощутимый результат за 28 дней\n"
-        "— Получите лёгкую систему на всю жизнь, а не на короткий период\n"
-        "— Сделаете это даже без обязательного посещения спортзала\n"
-        "— Будете при этом наслаждаться жизнью, не испытывать стресс и голод\n"
-        "— Сможете вписать в программу даже «запрещёнку» — бургер, пиво, шаурму, сладкое, десерты — без чувства вины 🔥\n\n"
-        "Набор в Реалити #ПП «Программа Преображения» открыт прямо сейчас.\n\n"
-        "Старт: *23 июня*\n"
-        "Длительность: *28 дней*\n\n"
-        "*ФОРМАТ:*\n"
-        "❌ ЭТО НЕ КУРС\n"
-        "❌ Не краткосрочная программа\n"
-        "❌ Не марафон\n"
-        "❌ Не челлендж\n"
-        "👉 Это участие в процессе — реалити практикум. Записанные видео + живое сопровождение Ивана и куратора\n\n"
-        "*Вот что вы получите, чтобы добиться своей цели по преображению тела:*\n\n"
-        "✅ Доступ к реалити «Программа Преображения» на 28 дней\n"
-        "✅ Закрытый Telegram-канал реалити\n"
-        "✅ Ежедневные короткие видео от Ивана Самохина: конкретика по системе питания и тренировок\n"
-        "✅ Персональный план тренировок под Ваш тип тела и образ жизни\n"
-        "✅ Систему питания и персональный план — без голодания и жёстких ограничений\n"
-        "✅ Обратная связь от куратора ежедневно\n"
-        "✅ Разбор прогресса участников еженедельно от Ивана Самохина\n"
-        "✅ Поддержка от Ивана и других участников реалити\n\n"
-        "*ПОЧЕМУ РЕАЛИТИ?*\n"
-        "Тут будет реальная жизнь, а не идеальная картинка.\n\n"
-        "В закрытом канале Иван каждый день показывает, как за 4 недели вернул форму — без диет, насилия и марафонов.\n\n"
-        "Всё из реальной жизни: какие продукты покупает, как готовит, как считает КБЖУ, как тренируется, как справляется с усталостью.\n\n"
-        "За 28 дней вы почувствуете контроль над телом, едой и энергией — без диет, запретов и жизни в спортзале.\n\n"
-        "⏱ *Прямо сейчас для Вас действует специальная цена — только 1 час.*\n\n"
-        "Хотите воспользоваться специальной ценой прямо сейчас?",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Получить специальную цену →",
-                url=f"{PAY_PROMO}&tg_id={uid}")],
-        ]))
-
-    # Логируем завершение анкеты
-    try:
-        from db import log_event as _log, user_update_profile as _profile
-        _log(uid, "quiz_completed", f"goal={goal}")
-        # Сохраняем ответы анкеты
-        quiz_answers = (
-            f"пол={context.user_data.get('gender','?')} "
-            f"возраст={context.user_data.get('age','?')} "
-            f"вес={context.user_data.get('weight','?')} "
-            f"рост={context.user_data.get('height','?')} "
-            f"цель={goal}"
-        )
-        _profile(uid, goal=goal,
-                 weight=context.user_data.get("weight"),
-                 height=context.user_data.get("height"),
-                 age=context.user_data.get("age"),
-                 gender=context.user_data.get("gender"),
-                 quiz_answers=quiz_answers)
-    except Exception as e:
-        logger.error(f"analytics quiz error: {e}")
-
-    # Логируем клик на кнопку оплаты
-    try:
-        from db import log_event as _log
-        _log(uid, "pay_clicked", "promo_offer")
-    except Exception as e:
-        logger.error(f"analytics pay click error: {e}")
-
-    context.user_data["in_quiz"] = False  # анкета завершена
-    await schedule_dojim(uid, context)
-    return ConversationHandler.END
-
-
-async def cb_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text("Что Вам важнее всего узнать?", reply_markup=more_kb())
-
-
-async def _launch_block(update, context, block_key, auto_job_name, greeting):
-    """Запускает блок по кнопке с защитой от повтора (правка 4)."""
-    await update.callback_query.answer()
-    uid = update.callback_query.from_user.id
-    jq = context.application.job_queue
-    if jq:
-        for job in jq.get_jobs_by_name(f"{auto_job_name}_{uid}"):
-            job.schedule_removal()
-            logger.info(f"Отменён автозапуск {auto_job_name}_{uid}")
-    sent = context.user_data.setdefault("blocks_sent", set())
-    if block_key in sent:
-        await update.callback_query.message.reply_text(
-            "Вы уже читали этот раздел. Записаться можно здесь:",
-            reply_markup=pay_kb()
-        )
-        return
-    sent.add(block_key)
-    await update.callback_query.message.reply_text(greeting)
-    if jq:
-        if block_key == "b1":
-            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b1", ctx),
-                        when=2, name=f"man_b1_{uid}")
-        elif block_key == "b2":
-            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b2", ctx),
-                        when=2, name=f"man_b2_{uid}")
-        elif block_key == "b3":
-            jq.run_once(lambda ctx: _dispatch_next_block(uid, "b3", ctx),
-                        when=2, name=f"man_b3_{uid}")
-
-
-async def cb_start_b1(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _launch_block(update, context, "b1", "b1", "Сейчас пришлю историю Ивана 👇")
-
-async def cb_start_b2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _launch_block(update, context, "b2", "b2", "Сейчас расскажу, что вас ждёт внутри 👇")
-
-async def cb_start_b3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _launch_block(update, context, "b3", "b3", "Сейчас расскажу честно — кому подойдёт 👇")
-
-async def cb_i_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cb_start_b1(update, context)
-
-async def cb_i_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cb_start_b2(update, context)
-
-async def cb_i_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cb_start_b3(update, context)
-
-
-async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    arch_key = context.user_data.get("arch_key")
-    f = context.user_data.get("forecast")
-    arch = ARCHETYPES.get(arch_key)
-    txt = "📋 *Реалити #ПП «Программа Преображения»*\n\n"
-    if arch and f:
-        txt += f"Ваш тип: *{arch['emoji']} {arch['name']}*\nПрогноз: {f['wr']} за 28 дней\n\n"
-    await update.message.reply_text(txt, parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📊 Мой результат", callback_data="my_res")],
-            [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
-            [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
-            [InlineKeyboardButton("✅ Кому подходит, а кому нет?", callback_data="start_b3")],
-            [InlineKeyboardButton("💳 Записаться", url=PAYMENT_URL)],
-        ]))
-
-
-async def cb_my_res(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    arch_key = context.user_data.get("arch_key")
-    f = context.user_data.get("forecast")
-    arch = ARCHETYPES.get(arch_key)
-    if arch and f:
-        await update.callback_query.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
-        await update.callback_query.message.reply_text(
-            f"*Ваш тип:* {arch['emoji']} {arch['name']}\n*Прогноз:* {f['wr']} ({f['ch']}) за 28 дней",
-            parse_mode="Markdown")
-    else:
-        await update.callback_query.message.reply_text("Пройдите тест:\n👉 https://pp-reality.ru")
-
-
-async def _exec_block1(uid, bot, jq):
-    P = PHOTOS_URL
-    async def s(text, **kw): await bot.send_message(chat_id=uid, text=text, **kw)
-    async def ph(url): await send_photo_url(bot, uid, url)
-    async def mg(urls): await send_media_group_urls(bot, uid, urls)
-
-    await s("*Кто такой Иван Самохин?*\n"
-            "Создатель Реалити #ПП «Программа Преображения» 👇\n\n"
-            "Вы знаете его как создателя и ведущего подкаста «Состояние» "
-            "со 155 000 подписчиков на YouTube и 65+ миллионами просмотров.\n\n"
-            "Но сейчас Вы узнаете про его путь в преображении тела на протяжении 24 лет. "
-            "Иван расскажет свою историю 👇", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await s("*НАЧАЛО*\n\n"
-            "В детстве я был слабым ребёнком — постоянно болел, плохой иммунитет. "
-            "Таких сейчас называют астеник. Можно уверенно сказать, что я был дрыщом в 14 лет.\n\n"
-            "*«У тебя просто генетика» — самый вредный миф*\n\n"
-            "Когда люди видят мой результат сегодня, говорят: «Ну у тебя гены». "
-            "Я начал качаться под впечатлением от Сталлоне и Шварценеггера, как и многие из вас.\n\n"
-            "Важна не генетика, а привычки. За последние три месяца я не пропустил ни одной "
-            "из трёх тренировок в неделю. Не потому что сверхчеловек — а потому что это "
-            "стало автоматикой, как чистить зубы.", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await ph(f"{P}/ivan_years.jpeg")
-    await asyncio.sleep(20)
-    await s("*Почему я не тренер (и почему это вам выгодно)*\n\n"
-            "За 24 года я перепробовал сотни тренеров в разных странах.\n\n"
-            "Большинство из них:\n"
-            "→ Рано или поздно предлагают анаболики (им нужен быстрый кейс, а не ваше здоровье)\n"
-            "→ Живут в зале по 12 часов, питаются из контейнеров\n"
-            "→ Видят только вес и процент жира, забывая про ментальное состояние\n\n"
-            "Я не тренер и не врач. Я практик с 24-летним стажем, который провёл 60+ интервью "
-            "с учёными, генетиками и эндокринологами.", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await mg([f"{P}/book_sostoyanie.jpeg", f"{P}/book_sostoyanie2.jpeg", f"{P}/youtube_channel.jpeg"])
-    await asyncio.sleep(20)
-    await s("*Почему ваши тренировки не работают (и что делать вместо этого)*\n\n"
-            "Вы знаете это чувство: купили абонемент, пошли три недели, потом работа, "
-            "командировка, «всё потом нагоню». Или сели на марафон — отказались от всего, "
-            "а через месяц вернулись с лишними килограммами и чувством вины.\n\n"
-            "Я проходил это. Ломал ногу, пропадал на месяцы. И каждый раз возвращался "
-            "к форме не благодаря «железной воле», а благодаря системе.", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await s("*Система против марафонов*\n\n"
-            "Марафон вырывает вас из жизни: резкие запреты, режим, отказ от семьи и работы. "
-            "Потом — обязательный откат.", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await s("*Мой подход другой.*\n\n"
-            "Я работаю каждый день, ем в ресторанах, бывает и фастфуд, перелёты, дедлайны. "
-            "И при этом уже 24 года держу форму.\n\n"
-            "Секрет не в отказах, а в пропорциях. Как в хорошем супе — важно соотношение "
-            "ингредиентов, а не голодовка.", parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await s("*Реальные цифры (снято на камеру)*\n\n"
-            "Перед запуском я прошёл программу сам. С нуля, зафиксировав всё:\n\n"
-            "За 28 дней:\n"
-            "→ −4,3 кг общего веса\n"
-            "→ −2,2 кг жировой массы\n"
-            "→ −1,8% телесного жира\n\n"
-            "При этом я не сидел на воде и огурцах. Ходил в рестораны, работал, жил нормально.",
-            parse_mode="Markdown")
-    await asyncio.sleep(20)
-    await ph(f"{P}/ivan_before_after.jpeg")
-    await asyncio.sleep(20)
-    await bot.send_message(chat_id=uid,
-        text="*Что вы получите*\n\n"
-             "Это не очередной «стань качком за месяц». Это система привычек, которая:\n\n"
-             "→ Работает в условиях перегрузов и командировок\n"
-             "→ Не требует жить в зале и носить еду в контейнерах\n"
-             "→ Учитывает ваше ментальное и физическое здоровье как единое целое\n"
-             "→ Остаётся с вами навсегда, а не на 28 дней\n\n"
-             "*Старт программы: 23 июня.*\n\n"
-             "Места ограничены. Если вы устали от тренеров-зомби и марафонов — "
-             "*пришло время для системы, которая работает в реальной жизни.\n"
-             "Если Вы чувствуете, что это то, что Вам нужно — не откладывайте.*",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Записаться в Реалити →", url=f"{PAY_URL}?tg_id={uid}")]]))
-    # Планируем следующий непросмотренный блок
-    await schedule_next_unseen(uid, "b2", jq)
-    # Планируем следующий непросмотренный блок
-    await schedule_next_unseen(uid, "b1", jq)
-
-
-async def _exec_block2(uid, bot, jq):
-    await bot.send_message(chat_id=uid,
-        text="☄️ Почему Вы не худеете — и это точно не лень\n\n"
-             "Иван записал урок, который отвечает на главный вопрос: "
-             "почему Вы уже 100 раз начинали, срывались, а вес возвращался.")
-    await asyncio.sleep(20)
-    await bot.send_message(chat_id=uid,
-        text="Что внутри:\n\n"
-             "• Почему дело часто не в «силе воли»\n"
-             "• Как худеть без голода и без «есть на 1200»\n"
-             "• Примеры питания на 1500 / 2000 / 2500 / 3000 ккал\n"
-             "• Как вписывать «запрещёнку» — бургер, пиво, шаурму — без чувства вины\n\n"
-             "После просмотра Вы:\n\n"
-             "• Поймёте, почему раньше не получалось\n"
-             "• Увидите, какие шаги реально дают результат\n"
-             "• Перестанете ломать себя и начнёте действовать по системе")
-    await asyncio.sleep(20)
-    await bot.send_message(chat_id=uid,
-        text="Смотрите урок по ссылке:\n"
-             "👉 https://kinescope.io/hubcbT4t5vnaLVYPC6UjAK\n\n"
-             "─────────────────\n\n"
-             "А всё, о чём говорится в уроке — это основа Реалити #ПП. "
-             "28 дней, каждый день, с Вашим типом и Вашей целью.\n\n"
-             "Старт *23 июня*. Если урок откликнулся — самое время сделать следующий шаг.",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]]))
-
-
-async def _exec_block3(uid, bot, jq):
-    # Сообщение 1 — вступление + кому НЕ + кому ДА
-    await bot.send_message(chat_id=uid,
-        text="Хотим быть с Вами честными.\n\n"
-             "Реалити #ПП подходит не всем — и это важно понять до принятия решения. "
-             "Прочитайте внимательно: это сэкономит Вам время и деньги, "
-             "если программа действительно не для Вас.\n\n"
-             "🚫 Реалити не для Вас, если:\n\n"
-             "❌ Вы ищете жёсткую диету с полным списком запретов — "
-             "здесь нет запрещённых продуктов, только понимание пропорций\n\n"
-             "❌ Вы хотите «минус 10 кг за неделю» — "
-             "таких результатов не бывает без вреда для здоровья\n\n"
-             "❌ Вы ждёте волшебную таблетку — "
-             "здесь нужно участвовать, смотреть, применять\n\n"
-             "✅ Реалити создано для Вас, если:\n\n"
-             "✔ Нет времени на сложные многочасовые программы\n"
-             "✔ Устали и в стрессе — хотите выстроить режим, не ломая себя\n"
-             "✔ Проходили через срывы и качели веса и хотите выбраться из круга\n"
-             "✔ Хотите форму без фанатизма — без лотков с едой\n"
-             "✔ Хотите результат, который вписывается в обычную жизнь")
-    await asyncio.sleep(20)
-
-    # Сообщение 2 — что почувствуете + путь Ивана + фото + CTA
-    await bot.send_message(chat_id=uid,
-        text="Что Вы почувствуете через 28 дней:\n\n"
-             "✔ Снижение веса и объёмов — без голода и срывов\n"
-             "✔ Больше энергии — уже к концу первой недели\n"
-             "✔ Меньше тяги к вредной еде\n"
-             "✔ Уверенность в своём теле\n"
-             "✔ Ощущение контроля — над едой, активностью, своим днём\n"
-             "✔ Привычки, которые остаются с Вами навсегда\n\n"
-             "Я уже прошёл этот путь.\n\n"
-             "Эти 28 дней — не теория и не план. "
-             "Это реальный процесс, который я прошёл сам и записал день за днём. "
-             "Специально для того, чтобы Вам было легче пройти его сейчас.")
-    await asyncio.sleep(20)
-    await send_photo_url(bot, uid, f"{PHOTOS_URL}/ivan_before_after.jpeg")
-    await asyncio.sleep(20)
-    await bot.send_message(chat_id=uid,
-        text="За 28 дней:\n"
-             "→ −4,3 кг веса\n"
-             "→ −2,2 кг жировой массы\n"
-             "→ −1,8% телесного жира\n\n"
-             "Без анаболиков. Без жёстких ограничений. В условиях обычной жизни.\n\n"
-             "─────────────────\n\n"
-             "Если Вы узнали себя в списке тех, кому это подойдёт — "
-             "не нужно больше думать и откладывать. "
-             "Каждый день ожидания — это ещё один день в том же круге.\n\n"
-             "*Старт 23 июня. Места ограничены.*\n\n"
-             "Сделайте шаг прямо сейчас — пока есть возможность.",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Записаться в Реалити →", url=f"{PAY_URL}?tg_id={uid}")]]))
-    # Планируем следующий непросмотренный блок
-    await schedule_next_unseen(uid, "b3", jq)
-
-
-async def cmd_ivan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /ivan — история Ивана Самохина."""
-    uid = update.effective_user.id
-    sent = context.user_data.setdefault("blocks_sent", set())
-    if "b1" in sent:
-        await update.message.reply_text(
-            "Вы уже читали этот раздел. Записаться можно здесь:",
-            reply_markup=pay_kb()
-        )
-        return
-    sent.add("b1")
-    await update.message.reply_text("Сейчас пришлю историю Ивана 👇")
-    jq = context.application.job_queue
-    if jq:
-        jq.run_once(lambda ctx: _exec_block1(uid, ctx.bot, ctx.application.job_queue),
-                    when=2, name=f"cmd_b1_{uid}")
-
-
-async def cmd_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /product — что вы получите в реалити."""
-    uid = update.effective_user.id
-    sent = context.user_data.setdefault("blocks_sent", set())
-    if "b2" in sent:
-        await update.message.reply_text(
-            "Вы уже читали этот раздел. Записаться можно здесь:",
-            reply_markup=pay_kb()
-        )
-        return
-    sent.add("b2")
-    await update.message.reply_text("Сейчас расскажу, что вас ждёт внутри 👇")
-    jq = context.application.job_queue
-    if jq:
-        jq.run_once(lambda ctx: _exec_block2(uid, ctx.bot, ctx.application.job_queue),
-                    when=2, name=f"cmd_b2_{uid}")
-
-
-async def cmd_fitsfor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /fitsfor — кому подходит реалити."""
-    uid = update.effective_user.id
-    sent = context.user_data.setdefault("blocks_sent", set())
-    if "b3" in sent:
-        await update.message.reply_text(
-            "Вы уже читали этот раздел. Записаться можно здесь:",
-            reply_markup=pay_kb()
-        )
-        return
-    sent.add("b3")
-    await update.message.reply_text("Сейчас расскажу честно — кому подойдёт 👇")
-    jq = context.application.job_queue
-    if jq:
-        jq.run_once(lambda ctx: _exec_block3(uid, ctx.bot, ctx.application.job_queue),
-                    when=2, name=f"cmd_b3_{uid}")
-
-
-async def cmd_myresult(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /myresult — показывает результат теста."""
-    arch_key = context.user_data.get("arch_key")
-    f = context.user_data.get("forecast")
-    arch = ARCHETYPES.get(arch_key)
-    if arch and f:
-        await update.message.reply_text(visual(f, arch["name"]), parse_mode="Markdown")
-        await asyncio.sleep(1)
-        await update.message.reply_text(
-            f"*Ваш тип:* {arch['emoji']} {arch['name']}\n"
-            f"*Прогноз:* {f['wr']} ({f['ch']}) за 28 дней",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Записаться в Реалити →", url=PAY_URL)]
-            ])
-        )
-    else:
-        await update.message.reply_text(
-            "Результат пока не найден. Пройдите тест, чтобы получить персональный разбор:\n\n"
-            "👉 " + QUIZ_URL
-        )
-
-
-
-async def schedule_next_unseen(uid, current_block, context_or_jq):
-    """После завершения блока запускает следующий непросмотренный через заданное время."""
-    # Получаем job_queue
-    if hasattr(context_or_jq, 'application'):
-        jq = context_or_jq.application.job_queue
-        user_data = context_or_jq.user_data if hasattr(context_or_jq, 'user_data') else {}
-    else:
-        jq = context_or_jq
-        user_data = {}
-
-    if not jq:
-        return
-
-    # Порядок блоков
-    order = ["b1", "b2", "b3", "final"]
-    delay = 86400  # 1 сутки между блоками
-
-    # Определяем какие блоки уже отправлены
-    # Берём из хранилища приложения по uid
-    app = jq.application if hasattr(jq, 'application') else None
-    if app and hasattr(app, 'user_data'):
-        sent = app.user_data.get(uid, {}).get("blocks_sent", set())
-    else:
-        sent = set()
-
-    # Помечаем текущий как отправленный
-    sent.add(current_block)
-    if app and hasattr(app, 'user_data'):
-        if uid not in app.user_data:
-            app.user_data[uid] = {}
-        app.user_data[uid]["blocks_sent"] = sent
-
-    # Ищем следующий непросмотренный
-    current_idx = order.index(current_block) if current_block in order else -1
-    for i in range(current_idx + 1, len(order)):
-        next_block = order[i]
-        if next_block not in sent:
-            logger.info(f"Планируем следующий блок {next_block} для uid={uid} через {delay}с")
-
-            async def _run_next(ctx, _block=next_block):
-                await _dispatch_next_block(uid, _block, ctx)
-
-            jq.run_once(_run_next, when=delay, name=f"auto_{next_block}_{uid}")
-            break
-
-
-async def _dispatch_next_block(uid, block_key, ctx):
-    """Запускает нужный блок и помечает как просмотренный."""
-    if is_paid(uid):
-        logger.info(f"uid={uid} уже оплатил — {block_key} пропущен")
-        return
-    bot = ctx.bot
-    jq = ctx.application.job_queue
-
-    # Помечаем как отправленный
-    if hasattr(ctx.application, 'user_data'):
-        if uid not in ctx.application.user_data:
-            ctx.application.user_data[uid] = {}
-        ctx.application.user_data[uid].setdefault("blocks_sent", set()).add(block_key)
-
-    if block_key == "b1":
-        await _exec_block1(uid, bot, jq)
-        await schedule_next_unseen(uid, "b1", ctx)
-    elif block_key == "b2":
-        await _exec_block2(uid, bot, jq)
-        await schedule_next_unseen(uid, "b2", ctx)
-    elif block_key == "b3":
-        await _exec_block3(uid, bot, jq)
-        await schedule_next_unseen(uid, "b3", ctx)
-    elif block_key == "final":
-        await _exec_final(uid, bot, jq)
-
-
-async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /export — выгрузка БД в Excel (только для админа)"""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    try:
-        from export import export_to_excel
-        import io
-        data = export_to_excel()
-        fname = f"payments_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-        await update.message.reply_document(
-            document=io.BytesIO(data),
-            filename=fname,
-            caption=f"📊 Выгрузка платежей — {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-
-
-
-def is_paid(tg_id: int) -> bool:
-    """Проверяет оплатил ли пользователь через PostgreSQL."""
-    try:
-        from db import is_paid as _is_paid
-        return _is_paid(tg_id)
-    except Exception:
-        return False
-
-
-
-async def forward_to_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пересылает сообщение пользователя в группу поддержки."""
-    if not SUPPORT_GROUP_ID:
-        return
-    msg = update.message
-    if not msg:
-        return
-    uid = msg.from_user.id
-
-    # Пересылаем ТОЛЬКО личные сообщения боту (private чат)
-    # Сообщения из каналов, групп потока и чатов — игнорируем
-    if msg.chat.type != "private":
-        return
-
-    # Не пересылаем сообщения из самой группы поддержки
-    if msg.chat.id == SUPPORT_GROUP_ID:
-        return
-    # Не пересылаем команды
-    if msg.text and msg.text.startswith('/'):
-        return
-
-    # Не пересылаем сообщения от админа
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid == admin_id:
-        return
-
-    # Не пересылаем если пользователь проходит анкету
-    if context.user_data.get("in_quiz"):
-        return
-
-    name = msg.from_user.full_name or ""
-    username = f"@{msg.from_user.username}" if msg.from_user.username else "без username"
-
-    # Простой текст без parse_mode — спецсимволы в именах не вызывают ошибок
-    header = f"👤 {name} | {username} | ID: {uid}"
-
-    try:
-        # Отправляем заголовок
-        header_msg = await context.bot.send_message(
-            chat_id=SUPPORT_GROUP_ID,
-            text=header,
-        )
-        # Пересылаем само сообщение
-        fwd_msg = await msg.forward(chat_id=SUPPORT_GROUP_ID)
-        # Сохраняем связь: оба message_id → tg_id пользователя
-        support_map = context.bot_data.setdefault("support_map", {})
-        support_map[header_msg.message_id] = uid
-        support_map[fwd_msg.message_id] = uid
-        logger.info(f"Переслано в поддержку от uid={uid}, msg_ids={header_msg.message_id},{fwd_msg.message_id}")
-    except Exception as e:
-        logger.error(f"Ошибка пересылки в поддержку: {e}")
-
-
-async def reply_from_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет ответ из группы поддержки пользователю."""
-    msg = update.message
-    if not msg or not msg.reply_to_message:
-        return
-    if msg.chat.id != SUPPORT_GROUP_ID:
-        return
-
-    # Ищем tg_id пользователя по reply
-    support_map = context.bot_data.get("support_map", {})
-    replied_id = msg.reply_to_message.message_id
-    tg_id = support_map.get(replied_id)
-
-    if not tg_id:
-        # Пробуем соседние message_id (пересланное сообщение идёт после заголовка)
-        for offset in [-1, 0, 1, -2, 2]:
-            tg_id = support_map.get(replied_id + offset)
-            if tg_id:
-                break
-
-    if not tg_id:
-        await msg.reply_text("⚠️ Не удалось найти пользователя. Убедитесь что отвечаете реплаем на пересланное сообщение.")
-        return
-
-    try:
-        if msg.text:
-            await context.bot.send_message(
-                chat_id=tg_id,
-                text="Ответ от команды:\n\n" + msg.text,
-                parse_mode="Markdown"
-            )
-        elif msg.photo:
-            await context.bot.send_photo(
-                chat_id=tg_id,
-                photo=msg.photo[-1].file_id,
-                caption=msg.caption or ""
-            )
-        elif msg.voice:
-            await context.bot.send_voice(chat_id=tg_id, voice=msg.voice.file_id)
-        elif msg.document:
-            await context.bot.send_document(chat_id=tg_id, document=msg.document.file_id)
-
-        await msg.reply_text(f"✅ Ответ отправлен пользователю ID: {tg_id}")
-        logger.info(f"Ответ отправлен пользователю {tg_id}")
-    except Exception as e:
-        await msg.reply_text(f"⚠️ Ошибка отправки: {e}")
-        logger.error(f"Ошибка ответа пользователю {tg_id}: {e}")
-
-
-
-
-
-
-
-
-async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /stats — сводная статистика (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    try:
-        from db import get_stats as _get_stats
-        s = _get_stats()
-        if not s:
-            await update.message.reply_text("Ошибка получения статистики.")
-            return
-
-        # Конверсия
-        conv = round(s["paid_total"] / s["total_users"] * 100, 1) if s["total_users"] else 0
-
-        # Топ архетипы
-        arch_names = {
-            "emotional_eater": "Эмоц. едок",
-            "social_hostage": "Соц. заложник",
-            "metabolic_skeptic": "Метаб. скептик",
-            "starter_stopper": "Стартер-стопер",
-        }
-        arch_lines = ""
-        for arch, cnt in s.get("archetypes", []):
-            arch_lines += f"  {arch_names.get(arch, arch)}: {cnt}\n"
-
-        # Топ события
-        event_lines = ""
-        for event, cnt in s.get("events", [])[:8]:
-            event_lines += f"  {event}: {cnt}\n"
-
-        text = (
-            f"📈 *Статистика бота*\n\n"
-            f"👥 Всего пользователей: *{s['total_users']}*\n"
-            f"🆕 Новых сегодня: *{s['new_today']}*\n"
-            f"📅 Новых за неделю: *{s['new_week']}*\n\n"
-            f"💰 Оплатили: *{s['paid_total']}*\n"
-            f"💵 Выручка: *{s['revenue']:,} ₽*\n"
-            f"📊 Конверсия: *{conv}%*\n\n"
-            f"⏳ В воронке сейчас: *{s['in_funnel']}*\n\n"
-            f"🎭 *Архетипы:*\n{arch_lines}\n"
-            f"🔢 *События:*\n{event_lines}"
-        )
-        await update.message.reply_text(text)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-
-
-async def _start_broadcast_flow(update, context, is_test=False):
-    """Запускает флоу рассылки."""
-    context.user_data["broadcast_is_test"] = is_test
-    context.user_data["broadcast_photo"] = None
-    context.user_data["broadcast_text"] = None
-    context.user_data["broadcast_step"] = "ask_photo"
-    label = "🧪 ТЕСТ" if is_test else "📢 РАССЫЛКА"
-    await update.message.reply_text(
-        f"{label}\n\n📸 Прикрепить фото к рассылке?",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Да, загружу фото", callback_data="bc_photo_yes")],
-            [InlineKeyboardButton("❌ Нет, только текст", callback_data="bc_photo_no")],
-        ])
-    )
-
-
-async def cb_broadcast_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает кнопки флоу рассылки."""
-    q = update.callback_query
-    await q.answer()
-    data = q.data
-    uid = q.from_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        return
-
-    if data == "bc_photo_yes":
-        context.user_data["broadcast_step"] = "wait_photo"
-        await q.message.reply_text("📸 Отправьте фото следующим сообщением:")
-
-    elif data == "bc_photo_no":
-        context.user_data["broadcast_step"] = "wait_text"
-        await q.message.reply_text(
-            "📝 Отправьте текст рассылки следующим сообщением.\n\n"
-            "Используйте {ссылка} для персональной ссылки.\n"
-            "Пример: [Выбрать тариф →]({ссылка})"
-        )
-
-    elif data == "bc_text_yes":
-        context.user_data["broadcast_step"] = "wait_text"
-        await q.message.reply_text(
-            "📝 Отправьте текст рассылки следующим сообщением.\n\n"
-            "Используйте {ссылка} для персональной ссылки.\n"
-            "Пример: [Выбрать тариф →]({ссылка})"
-        )
-
-    elif data == "bc_text_no":
-        context.user_data["broadcast_step"] = "confirm"
-        await _show_broadcast_confirm(q.message, context)
-
-    elif data == "bc_confirm_yes":
-        context.user_data["broadcast_step"] = None
-        await _do_broadcast(q.message, context)
-
-    elif data == "bc_confirm_no":
-        context.user_data["broadcast_step"] = None
-        context.user_data["broadcast_photo"] = None
-        context.user_data["broadcast_text"] = None
-        await q.message.reply_text("❌ Рассылка отменена.")
-
-
-async def _show_broadcast_confirm(message, context):
-    """Показывает превью и кнопки подтверждения."""
-    is_test = context.user_data.get("broadcast_is_test", False)
-    photo = context.user_data.get("broadcast_photo")
-    text = context.user_data.get("broadcast_text", "")
-    label = "🧪 Тест (только вам)" if is_test else "📢 Всем пользователям"
-
-    parts = []
-    if photo:
-        parts.append("✅ Фото: есть")
-    else:
-        parts.append("❌ Фото: нет")
-    if text:
-        parts.append(f"✅ Текст: {text[:80]}...")
-    else:
-        parts.append("❌ Текст: нет")
-
-    await message.reply_text(
-        f"Готово к отправке ({label}):\n\n" + "\n".join(parts) + "\n\nОтправить?",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Отправить", callback_data="bc_confirm_yes")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="bc_confirm_no")],
-        ])
-    )
-
-
-async def _do_broadcast(message, context):
-    """Выполняет рассылку."""
-    is_test = context.user_data.get("broadcast_is_test", False)
-    photo = context.user_data.get("broadcast_photo")
-    text = context.user_data.get("broadcast_text", "")
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-
-    if is_test:
-        users = [admin_id]
-        await message.reply_text("🧪 Отправляю тест...")
-    else:
-        from db import get_broadcast_users as _get_users
-        users = _get_users()
-        await message.reply_text(f"📢 Начинаю рассылку для {len(users)} пользователей...")
-
-    sent = 0
-    failed = 0
-    for tg_id in users:
-        try:
-            personal_url = f"{PAY_URL}?tg_id={tg_id}"
-            personal_text = text.replace("{ссылка}", personal_url) if text else None
-
-            if photo and personal_text:
-                # Фото + текст отдельным сообщением
-                await context.bot.send_photo(chat_id=tg_id, photo=photo)
-                await asyncio.sleep(0.3)
-                await context.bot.send_message(
-                    chat_id=tg_id,
-                    text=personal_text,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-            elif photo:
-                await context.bot.send_photo(chat_id=tg_id, photo=photo)
-            elif personal_text:
-                await context.bot.send_message(
-                    chat_id=tg_id,
-                    text=personal_text,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-            sent += 1
-            await asyncio.sleep(0.05)
-        except Exception:
-            failed += 1
-
-    try:
-        from db import log_event as _log
-        _log(admin_id, "broadcast_sent", f"sent={sent} failed={failed}")
-    except Exception:
-        pass
-
-    await message.reply_text(
-        f"✅ Готово!\n\nОтправлено: {sent}\nОшибок: {failed}"
-    )
-
-
-async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /broadcast — рассылка всем пользователям (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-    await _start_broadcast_flow(update, context, is_test=False)
-
-
-async def cmd_broadcast_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /broadcast_test — тестовая рассылка только себе (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-    await _start_broadcast_flow(update, context, is_test=True)
-
-
-async def cmd_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получает фото или текст в нужном шаге флоу рассылки."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        return
-
-    step = context.user_data.get("broadcast_step")
-    if not step:
-        return
-
-    if step == "wait_photo" and update.message.photo:
-        context.user_data["broadcast_photo"] = update.message.photo[-1].file_id
-        context.user_data["broadcast_step"] = "ask_text"
-        await update.message.reply_text(
-            "✅ Фото получено!\n\n📝 Добавить текст к рассылке?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Да, добавлю текст", callback_data="bc_text_yes")],
-                [InlineKeyboardButton("❌ Нет, только фото", callback_data="bc_text_no")],
-            ])
-        )
-    elif step == "wait_text" and update.message.text:
-        context.user_data["broadcast_text"] = update.message.text
-        context.user_data["broadcast_step"] = "confirm"
-        await _show_broadcast_confirm(update.message, context)
-
-
-async def cmd_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /msg <tg_id> — отправить сообщение конкретному пользователю (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("Использование: /msg <tg_id>\nПример: /msg 1423869511")
-        return
-
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Ошибка: tg_id должен быть числом.")
-        return
-
-    context.user_data["msg_target_id"] = target_id
-    context.user_data["waiting_msg"] = True
-    await update.message.reply_text(
-        f"📝 Напишите сообщение для пользователя {target_id}.\n\nОтправьте его следующим сообщением:"
-    )
-
-
-async def cmd_msg_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет сообщение пользователю после /msg."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        return
-
-    if not context.user_data.get("waiting_msg"):
-        return
-
-    target_id = context.user_data.get("msg_target_id")
-    if not target_id:
-        return
-
-    context.user_data["waiting_msg"] = False
-    context.user_data["msg_target_id"] = None
-
-    try:
-        if update.message.photo:
-            await context.bot.send_photo(
-                chat_id=target_id,
-                photo=update.message.photo[-1].file_id,
-                caption=update.message.caption or ""
-            )
-        elif update.message.text:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=update.message.text
-            )
-        await update.message.reply_text(f"✅ Сообщение отправлено пользователю {target_id}")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-
-
-async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /invite <tg_id> — генерирует ссылки на канал и чат для пользователя (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("Использование: /invite <tg_id>\nПример: /invite 1423869511")
-        return
-
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Ошибка: tg_id должен быть числом.")
-        return
-
-    channel_id = int(os.getenv("CHANNEL_ID", "0"))
-    club_chat_id = int(os.getenv("CLUB_CHAT_ID", "0"))
-
-    try:
-        links = []
-        if channel_id:
-            channel_link = await context.bot.create_chat_invite_link(
-                chat_id=channel_id, member_limit=1, name=f"invite_{target_id}"
-            )
-            links.append(f"📺 Канал: {channel_link.invite_link}")
-        if club_chat_id:
-            chat_link = await context.bot.create_chat_invite_link(
-                chat_id=club_chat_id, member_limit=1, name=f"invite_{target_id}"
-            )
-            links.append(f"💬 Чат: {chat_link.invite_link}")
-
-        if links:
-            links_text = "\n".join(links)
-            await update.message.reply_text(f"✅ Ссылки для пользователя {target_id}:\n\n{links_text}")
-            await context.bot.send_message(
-                chat_id=target_id,
-                text="Ваши персональные ссылки для доступа:\n\n" + links_text
-            )
-            await update.message.reply_text(f"✅ Ссылки также отправлены пользователю {target_id}")
-        else:
-            await update.message.reply_text("Ошибка: CHANNEL_ID и CLUB_CHAT_ID не заданы.")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-
-
-
-    """Команда /invite <tg_id> — генерирует ссылки на канал и чат для пользователя (только для админа)."""
-    uid = update.effective_user.id
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    if uid != admin_id:
-        await update.message.reply_text("⛔ Нет доступа.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("Использование: /invite <tg_id>\nПример: /invite 1423869511")
-        return
-
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Ошибка: tg_id должен быть числом.")
-        return
-
-    channel_id = int(os.getenv("CHANNEL_ID", "0"))
-    club_chat_id = int(os.getenv("CLUB_CHAT_ID", "0"))
-
-    try:
-        links = []
-
-        if channel_id:
-            channel_link = await context.bot.create_chat_invite_link(
-                chat_id=channel_id,
-                member_limit=1,
-                name=f"invite_{target_id}"
-            )
-            links.append(f"📺 Канал: {channel_link.invite_link}")
-
-        if club_chat_id:
-            chat_link = await context.bot.create_chat_invite_link(
-                chat_id=club_chat_id,
-                member_limit=1,
-                name=f"invite_{target_id}"
-            )
-            links.append(f"💬 Чат: {chat_link.invite_link}")
-
-        if links:
-            links_text = "\n".join(links)
-            await update.message.reply_text(
-                f"✅ Ссылки для пользователя {target_id}:\n\n{links_text}"
-            )
-            await context.bot.send_message(
-                chat_id=target_id,
-                text="Ваши персональные ссылки для доступа:\n\n" + links_text
-            )
-            await update.message.reply_text(f"✅ Ссылки также отправлены пользователю {target_id}")
-        else:
-            await update.message.reply_text("Ошибка: CHANNEL_ID и CLUB_CHAT_ID не заданы.")
-
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-
-
-async def restore_funnels(application):
-    """Восстанавливает запланированные задачи после деплоя из БД."""
-    from datetime import timedelta
-    try:
-        from db import funnel_get_active as _get_active
-        rows = _get_active()
-        if not rows:
-            logger.info("Нет активных воронок для восстановления")
-            return
-
-        now = datetime.now()
-        jq = application.job_queue
-        restored = 0
-
-        for row in rows:
-            tg_id, blocks_sent_str, d1h_at, b1_at, b2_at, b3_at, final_at = row
-            sent = set(blocks_sent_str.split(',')) if blocks_sent_str else set()
-
-            # Для каждого незапланированного блока — проверяем время
-            schedule_map = {
-                "d1h":   d1h_at,
-                "b1":    b1_at,
-                "b2":    b2_at,
-                "b3":    b3_at,
-                "final": final_at,
-            }
-
-            for block_key, send_at in schedule_map.items():
-                if send_at is None:
-                    continue
-                if block_key in sent:
-                    continue  # уже отправлен
-
-                # Считаем задержку — только будущие задачи
-                delay = (send_at - now).total_seconds()
-                if delay < 0:
-                    # Время уже прошло — задача либо выполнена, либо потеряна при деплое
-                    # В обоих случаях пропускаем — blocks_sent должен был быть обновлён
-                    logger.info(f"Блок {block_key} для uid={tg_id} в прошлом, пропускаем")
-                    continue
-
-                # Планируем задачу
-                _uid = tg_id
-                _key = block_key
-
-                async def _run(ctx, uid=_uid, key=_key):
-                    await _dispatch_block_by_key(uid, key, ctx)
-
-                job_name = f"restore_{block_key}_{tg_id}"
-                # Не дублируем если уже запланировано
-                existing = jq.get_jobs_by_name(job_name)
-                if not existing:
-                    jq.run_once(_run, when=delay, name=job_name)
-                    restored += 1
-                    logger.info(f"Восстановлен блок {block_key} для uid={tg_id} через {int(delay)}с")
-
-        logger.info(f"Восстановлено задач: {restored} для {len(rows)} пользователей ✅")
-
-    except Exception as e:
-        logger.error(f"restore_funnels error: {e}")
-
-
-async def _dispatch_block_by_key(uid: int, block_key: str, ctx):
-    """Универсальный запуск блока по ключу (для восстановления)."""
-    if is_paid(uid):
-        logger.info(f"uid={uid} уже оплатил — {block_key} пропущен при восстановлении")
-        return
-
-    bot = ctx.bot
-    jq = ctx.application.job_queue
-
-    try:
-        from db import funnel_mark_block as _mark
-        # Логируем просмотр блока
-        try:
-            from db import log_event as _log
-            _log(uid, f"block_viewed", block_key)
-        except Exception as e:
-            logger.error(f"analytics block log error: {e}")
-
-        if block_key == "d1h":
-            await ctx.bot.send_message(
-                uid,
-                "Прежде чем примите решение, хочу рассказать Вам больше о том, что стоит за Реалити #ПП.\n\n"
-                "Выберите, с чего начать 👇",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📖 История Ивана Самохина", callback_data="start_b1")],
-                    [InlineKeyboardButton("💪 Что вы получите в реалити?", callback_data="start_b2")],
-                    [InlineKeyboardButton("✅ Кому подходит реалити, а кому нет?", callback_data="start_b3")],
-                    [InlineKeyboardButton("Записаться →", url=f"{PAY_URL}?tg_id={uid}")],
-                ])
-            )
-            _mark(uid, "d1h")
-            logger.info(f"d1h выполнен и помечен для uid={uid}")
-        elif block_key == "b1":
-            await _exec_block1(uid, bot, jq)
-            _mark(uid, "b1", "b2", datetime.now() + __import__('datetime').timedelta(seconds=86400))
-        elif block_key == "b2":
-            await _exec_block2(uid, bot, jq)
-            _mark(uid, "b2", "b3", datetime.now() + __import__('datetime').timedelta(seconds=86400))
-        elif block_key == "b3":
-            await _exec_block3(uid, bot, jq)
-            _mark(uid, "b3", "final", datetime.now() + __import__('datetime').timedelta(seconds=86400))
-        elif block_key == "final":
-            if not is_paid(uid):
-                await ctx.bot.send_message(
-                    uid,
-                    "*Реалити уже скоро!*",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Выбрать тариф →", url=PAY_URL)]])
-                )
-            _mark(uid, "final")
-    except Exception as e:
-        logger.error(f"_dispatch_block_by_key error uid={uid} block={block_key}: {e}")
-
-
-def main():
-    if not TOKEN:
-        logger.error("BOT_TOKEN не установлен!")
-        return
-
-    from telegram import BotCommand
-
-    async def post_init(application):
-        await application.bot.set_my_commands([
-            BotCommand("myresult",  "📊 Мой результат теста"),
-            BotCommand("ivan",      "📖 История Ивана Самохина"),
-            BotCommand("product",   "💪 Что вы получите в реалити"),
-            BotCommand("fitsfor",   "✅ Кому подходит реалити"),
-            BotCommand("menu",      "📋 Главное меню"),
-            BotCommand("export",    "📥 Выгрузить базу данных"),
-            BotCommand("stats",     "📈 Статистика (админ)"),
-            BotCommand("broadcast", "📢 Рассылка (админ)"),
-            BotCommand("broadcast_test", "🧪 Тест рассылки (админ)"),
-            BotCommand("invite", "🔗 Выдать доступ вручную (админ)"),
-            BotCommand("msg", "✉️ Написать пользователю (админ)"),
-        ])
-        logger.info("Команды меню установлены ✅")
-
-        # Запускаем payment server в том же event loop
-        try:
-            import sys, os
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from aiohttp import web as _web
-            from payments import create_app as _create_app
-            from db import init_db as _init_db
-            _init_db()
-            _payment_app = _create_app()
-            _port = int(os.getenv("PORT", "8080"))
-            runner = _web.AppRunner(_payment_app)
-            await runner.setup()
-            site = _web.TCPSite(runner, "0.0.0.0", _port)
-            await site.start()
-            logger.info(f"Payment server запущен на порту {_port} ✅")
-        except Exception as e:
-            logger.error(f"Payment server ошибка: {e}")
-
-        # Восстанавливаем воронки после деплоя
-        await restore_funnels(application)
-
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start)],
-        states={
-            ASK_GENDER: [
-                CallbackQueryHandler(cb_go, pattern="^go$"),
-                CallbackQueryHandler(cb_later, pattern="^later$"),
-                CallbackQueryHandler(cb_gender, pattern="^g[mf]$"),
-            ],
-            ASK_AGE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, got_age)],
-            ASK_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, got_weight)],
-            ASK_HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, got_height)],
-            ASK_GOAL:   [CallbackQueryHandler(got_goal, pattern="^gl_")],
-        },
-        fallbacks=[CommandHandler("menu", cmd_menu)],
-        allow_reentry=True,
-    )
-
-    app.add_handler(conv)
-    app.add_handler(CommandHandler("menu",      cmd_menu))
-    app.add_handler(CommandHandler("ivan",      cmd_ivan))
-    app.add_handler(CommandHandler("product",   cmd_product))
-    app.add_handler(CommandHandler("fitsfor",   cmd_fitsfor))
-    app.add_handler(CommandHandler("myresult",  cmd_myresult))
-    app.add_handler(CommandHandler("export",    cmd_export))
-    app.add_handler(CommandHandler("stats",     cmd_stats))
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
-    app.add_handler(CommandHandler("invite", cmd_invite))
-    app.add_handler(CommandHandler("msg", cmd_msg))
-    app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
-    app.add_handler(CallbackQueryHandler(cb_broadcast_flow, pattern="^bc_"))
-    app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
-    app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
-    app.add_handler(CallbackQueryHandler(cb_start_b2,  pattern="^start_b2$"))
-    app.add_handler(CallbackQueryHandler(cb_start_b3,  pattern="^start_b3$"))
-    app.add_handler(CallbackQueryHandler(cb_i_about,   pattern="^i_about$"))
-    app.add_handler(CallbackQueryHandler(cb_i_program, pattern="^i_program$"))
-    app.add_handler(CallbackQueryHandler(cb_i_results, pattern="^i_results$"))
-    app.add_handler(CallbackQueryHandler(cb_my_res,    pattern="^my_res$"))
-    # Поддержка — пересылка сообщений
-    # group=1 означает что ConversationHandler (group=0) обрабатывается первым
-    # и если он взял сообщение — forward_to_support не вызывается
-    app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY, reply_from_support))
-    # Хендлер для текста/фото от админа — рассылка или личное сообщение (group=1)
-    admin_id = int(os.getenv("ADMIN_TG_ID", "0"))
-    async def admin_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if context.user_data.get("waiting_msg"):
-            await cmd_msg_send(update, context)
-        elif context.user_data.get("broadcast_step"):
-            await cmd_broadcast_send(update, context)
-    app.add_handler(MessageHandler(
-        (filters.TEXT | filters.PHOTO) & ~filters.COMMAND & filters.User(admin_id),
-        admin_message_router
-    ), group=1)
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.Chat(SUPPORT_GROUP_ID), forward_to_support), group=2)
-
-    logger.info("Программа Преображения bot started ✅")
-
-    app.run_polling(drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    main()
+// ── Определяем режим (скидка или нет) по URL-параметру ──
+var params = new URLSearchParams(window.location.search);
+var isPromo = params.get('promo') === '1';
+
+function applyPrices() {
+  if (isPromo) {
+    // Скидочные цены
+    document.getElementById('p0').textContent = fmt(PRICES.base.sale);
+    document.getElementById('p0old').textContent = fmt(PRICES.base.normal);
+    document.getElementById('p0old').style.display = 'inline';
+    document.getElementById('p0save').style.display = 'inline-block';
+
+    document.getElementById('p1').textContent = fmt(PRICES.extended.sale);
+    document.getElementById('p1old').textContent = fmt(PRICES.extended.normal);
+    document.getElementById('p1old').style.display = 'inline';
+    document.getElementById('p1save').style.display = 'inline-block';
+
+    document.getElementById('p2').textContent = fmt(PRICES.personal.sale);
+    document.getElementById('p2old').textContent = fmt(PRICES.personal.normal);
+    document.getElementById('p2old').style.display = 'inline';
+    document.getElementById('p2save').style.display = 'inline-block';
+
+    document.getElementById('promoBanner').classList.add('show');
+    document.getElementById('heroBadge').textContent = '⚡ Ваша специальная цена активна — выберите тариф';
+    document.getElementById('heroSub').innerHTML = 'Специальная цена действует ещё 1 час.<br>8 недель программы Реалити #ПП «Программа Преображения» — персональный план, закрытый канал, реальный результат.';
+
+    // Ссылки на оплату со скидкой
+
+
+    startTimer();
+  } else {
+    // Стандартные цены
+
+  }
+}
+
+// ── ТАЙМЕР ──
+function startTimer() {
+  // Сохраняем дедлайн в sessionStorage чтобы не сбрасывался при перезагрузке
+  var key = 'fitstate_promo_end';
+  var end = sessionStorage.getItem(key);
+  if (!end) {
+    end = Date.now() + 3600 * 1000;
+    sessionStorage.setItem(key, end);
+  }
+  end = parseInt(end);
+
+  function tick() {
+    var left = Math.max(0, end - Date.now());
+    var min = Math.floor(left / 60000);
+    var sec = Math.floor((left % 60000) / 1000);
+    document.getElementById('tMin').textContent = String(min).padStart(2, '0');
+    document.getElementById('tSec').textContent = String(sec).padStart(2, '0');
+    if (left > 0) {
+      setTimeout(tick, 1000);
+    } else {
+      // Таймер истёк — убираем скидку
+      document.getElementById('promoBanner').innerHTML =
+        '<p>⏰ <strong>Время специальной цены истекло.</strong> Действуют стандартные цены.</p>';
+      isPromo = false;
+      applyNormalPrices();
+    }
+  }
+  tick();
+}
+
+function applyNormalPrices() {
+  document.getElementById('p0').textContent = fmt(PRICES.base.normal);
+  document.getElementById('p0old').style.display = 'none';
+  document.getElementById('p0save').style.display = 'none';
+  document.getElementById('p1').textContent = fmt(PRICES.extended.normal);
+  document.getElementById('p1old').style.display = 'none';
+  document.getElementById('p1save').style.display = 'none';
+  document.getElementById('p2').textContent = fmt(PRICES.personal.normal);
+  document.getElementById('p2old').style.display = 'none';
+  document.getElementById('p2save').style.display = 'none';
+}
+
+// ── FAQ ──
+function toggleFaq(el) {
+  var item = el.parentElement;
+  item.classList.toggle('open');
+}
+
+applyPrices();
+</script>
+</body>
+</html>
