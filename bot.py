@@ -1908,6 +1908,8 @@ def main():
     app.add_handler(CommandHandler("invite", cmd_invite))
     app.add_handler(CommandHandler("msg", cmd_msg))
     app.add_handler(CommandHandler("broadcast_test", cmd_broadcast_test))
+    app.add_handler(CallbackQueryHandler(cb_go,    pattern="^go$"))
+    app.add_handler(CallbackQueryHandler(cb_later, pattern="^later$"))
     app.add_handler(CallbackQueryHandler(cb_broadcast_flow, pattern="^bc_"))
     app.add_handler(CallbackQueryHandler(cb_more,      pattern="^more_info$"))
     app.add_handler(CallbackQueryHandler(cb_start_b1,  pattern="^start_b1$"))
